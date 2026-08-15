@@ -200,6 +200,32 @@
   .gate{ text-align:center; padding:20px 4px; }
   .gate p{ font-size:14px; color:var(--ink-soft); margin-bottom:16px; }
   .gate input{ text-align:center; font-size:20px; letter-spacing:4px; }
+
+  .panel-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:8px; }
+  .btn-secundario{
+    padding:9px 14px; border-radius:8px; border:1.5px solid var(--ink); background:transparent;
+    color:var(--ink); font-weight:600; font-size:12.5px; cursor:pointer; font-family:'IBM Plex Mono',monospace;
+  }
+  .grid-wrap{ overflow-x:auto; border:1px solid var(--line); border-radius:10px; background:var(--card); }
+  table.grid{ border-collapse:collapse; width:100%; min-width:900px; font-size:12.5px; }
+  table.grid th{
+    background:var(--ink); color:var(--paper); font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px; text-align:left; padding:8px 6px; white-space:nowrap; position:sticky; top:0;
+  }
+  table.grid td{ border-bottom:1px solid var(--paper-dim); padding:3px; vertical-align:top; }
+  table.grid input{
+    width:100%; border:1px solid transparent; background:transparent; padding:6px; font-size:12.5px;
+    font-family:'Inter',sans-serif; border-radius:5px;
+  }
+  table.grid input:focus{ border-color:var(--stamp-teal); background:var(--paper); outline:none; }
+  table.grid tr.nueva td{ background:#FFF3EA; }
+  td.col-guardar{ text-align:center; width:38px; }
+  .btn-fila{
+    width:30px; height:30px; border-radius:7px; border:none; background:var(--ink); color:#fff;
+    cursor:pointer; font-size:13px;
+  }
+  .btn-fila.ok{ background:var(--stamp-teal); }
+  .btn-fila.err{ background:var(--stamp-orange); }
 </style>
 </head>
 <body>
@@ -452,7 +478,31 @@ function escapeHtml(str){
   }[m]));
 }
 
-// ---- Formulario: Agregar / Editar carta ----
+// ---- Panel de control: cuadrícula tipo Excel + subidor de PDF ----
+let filasNuevas = [];        // filas en blanco/prellenadas aún no guardadas
+let archivosPendientes = {}; // key de fila -> File pendiente de subir
+
+const COLUMNAS = {
+  emitida: [
+    { key: "numero", label: "N° CARTA", ancho: "70px" },
+    { key: "fechaRealizado", label: "F. REALIZADO", ancho: "95px" },
+    { key: "fecha", label: "F. RECEPCIONADO", ancho: "100px" },
+    { key: "asunto", label: "ASUNTO", ancho: "auto" },
+    { key: "informe", label: "N° INFORME", ancho: "80px" },
+    { key: "entidad", label: "PARA", ancho: "160px" },
+    { key: "link", label: "PDF (link)", ancho: "160px" }
+  ],
+  recibida: [
+    { key: "numero", label: "N° CARTA", ancho: "70px" },
+    { key: "codigoDe", label: "CÓDIGO", ancho: "130px" },
+    { key: "fecha", label: "F. RECEPCIONADA", ancho: "100px" },
+    { key: "asunto", label: "ASUNTO", ancho: "auto" },
+    { key: "entidad", label: "DE (entidad)", ancho: "160px" },
+    { key: "para", label: "PARA (persona)", ancho: "160px" },
+    { key: "link", label: "PDF (link)", ancho: "160px" }
+  ]
+};
+
 function renderFormulario(main){
   if(!panelDesbloqueado){
     main.innerHTML = `
@@ -462,50 +512,47 @@ function renderFormulario(main){
         <button class="btn-guardar" onclick="intentarDesbloquear()">Entrar</button>
         <div class="msg-form err" id="msgGate"></div>
       </div>`;
-    document.getElementById("pinEntrada").addEventListener("keydown", e => {
-      if(e.key === "Enter") intentarDesbloquear();
-    });
+    document.getElementById("pinEntrada").addEventListener("keydown", e => { if(e.key === "Enter") intentarDesbloquear(); });
     return;
   }
 
+  const cols = COLUMNAS[tipoFormulario];
+  const filasExistentes = tipoFormulario === "emitida" ? DATA.emitidas : DATA.recibidas;
+
   main.innerHTML = `
-    <div class="formulario">
-      <label>Arrastra el PDF aquí (o toca para elegirlo)</label>
-      <div class="dropzone" id="dropzone">
-        <span class="icono">📄</span>
-        <span class="texto" id="dropzoneTexto">${archivoSeleccionado ? archivoSeleccionado.name : "El sistema va a leer el número, el tipo y el asunto del nombre del archivo — revísalo abajo antes de guardar"}</span>
+    <div class="panel-header">
+      <div class="segmentado" style="width:auto;">
+        <button type="button" class="${tipoFormulario==='recibida'?'on':''}" onclick="cambiarTipo('recibida')">Recibidos</button>
+        <button type="button" class="${tipoFormulario==='emitida'?'on':''}" onclick="cambiarTipo('emitida')">Emitidos</button>
       </div>
-      <input type="file" id="fArchivoOculto" accept="application/pdf" style="display:none">
-
-      <label>Tipo de carta</label>
-      <div class="segmentado">
-        <button type="button" class="${tipoFormulario==='recibida'?'on':''}" onclick="cambiarTipo('recibida')">Recibida</button>
-        <button type="button" class="${tipoFormulario==='emitida'?'on':''}" onclick="cambiarTipo('emitida')">Emitida</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn-secundario" onclick="agregarFilaVacia()">+ Nueva fila</button>
       </div>
+    </div>
 
-      <label>N° de carta</label>
-      <input type="text" id="fNumero" inputmode="numeric" placeholder="Ej: 345">
+    <label>📥 Subir PDF (autocompleta una fila nueva)</label>
+    <div class="dropzone" id="dropzone">
+      <span class="icono">📄</span>
+      <span class="texto" id="dropzoneTexto">Arrastra el PDF aquí, o toca para elegirlo</span>
+    </div>
+    <input type="file" id="fArchivoOculto" accept="application/pdf" style="display:none">
 
-      <label>Fecha</label>
-      <input type="date" id="fFecha">
+    <div class="grid-wrap" style="margin-top:14px;">
+      <table class="grid">
+        <thead><tr>
+          ${cols.map(c => `<th style="${c.ancho!=='auto'?'width:'+c.ancho:''}">${c.label}</th>`).join("")}
+          <th style="width:38px"></th>
+        </tr></thead>
+        <tbody id="cuerpoGrid">
+          ${filasNuevas.map((f, i) => filaHTML(f, cols, "nueva_"+i, true)).join("")}
+          ${filasExistentes.map((f, i) => filaHTML(f, cols, "existente_"+i, false)).join("")}
+        </tbody>
+      </table>
+    </div>
 
-      <label>Asunto</label>
-      <textarea id="fAsunto" placeholder="Describe brevemente el contenido de la carta"></textarea>
-
-      <div id="wrapEntidad">
-        <label>${tipoFormulario === 'emitida' ? 'Dirigida a (entidad)' : 'Entidad remitente'}</label>
-        <select id="fEntidad">
-          <option value="MUNICIPALIDAD DE CIUDAD NUEVA">Municipalidad</option>
-          <option value="CONSORCIO ANANEA (SUPERVISION)">Supervisión (Ananea)</option>
-          <option value="OTRO">Otro</option>
-        </select>
-      </div>
-
-      <label>PIN de acceso</label>
-      <input type="password" id="fPin" inputmode="numeric" value="${escapeHtml(pinSesion)}">
-
-      <button class="btn-guardar" id="btnGuardar" onclick="guardarCartaFormulario()">Guardar carta</button>
-      <div class="msg-form" id="msgForm"></div>
+    <div style="margin-top:14px;">
+      <label>PIN de acceso (necesario para guardar cualquier fila)</label>
+      <input type="password" id="pinGuardado" inputmode="numeric" value="${escapeHtml(pinSesion)}" style="max-width:200px;">
     </div>`;
 
   const dz = document.getElementById("dropzone");
@@ -517,12 +564,23 @@ function renderFormulario(main){
   dz.addEventListener("drop", e => { if(e.dataTransfer.files[0]) manejarArchivo(e.dataTransfer.files[0]); });
 }
 
+function filaHTML(f, cols, key, esNueva){
+  const celdas = cols.map(c => `<td><input class="c-${c.key}" value="${escapeAtributo(f[c.key] || "")}"></td>`).join("");
+  const tieneArchivo = archivosPendientes[key] ? " 📎" : "";
+  return `<tr data-key="${key}" class="${esNueva ? 'nueva' : ''}">
+    ${celdas}
+    <td class="col-guardar"><button class="btn-fila" onclick="guardarFila('${key}')" title="Guardar fila">💾${tieneArchivo}</button></td>
+  </tr>`;
+}
+
+function escapeAtributo(str){ return escapeHtml(str).replace(/"/g, "&quot;"); }
+
 function intentarDesbloquear(){
   const val = document.getElementById("pinEntrada").value.trim();
   const msg = document.getElementById("msgGate");
   if(!val){ msg.textContent = "Ingresa un PIN."; return; }
   pinSesion = val;
-  panelDesbloqueado = true; // la validación real ocurre en el servidor al guardar
+  panelDesbloqueado = true;
   renderFormulario(document.getElementById("main"));
 }
 
@@ -531,7 +589,15 @@ function cambiarTipo(tipo){
   renderFormulario(document.getElementById("main"));
 }
 
-// ---- Lee el nombre del PDF igual que tu DRIVE.gs, para autocompletar el formulario ----
+function agregarFilaVacia(){
+  const cols = COLUMNAS[tipoFormulario];
+  const vacia = {};
+  cols.forEach(c => vacia[c.key] = "");
+  filasNuevas.unshift(vacia);
+  renderFormulario(document.getElementById("main"));
+}
+
+// ---- Lee el nombre del PDF igual que tu DRIVE.gs, para autocompletar una fila nueva ----
 function parsearNombreArchivo(nombreOriginal){
   const nombre = nombreOriginal.toUpperCase();
   if(nombre.indexOf("CARTA") === -1) return null;
@@ -563,24 +629,25 @@ function parsearNombreArchivo(nombreOriginal){
 }
 
 function manejarArchivo(file){
-  archivoSeleccionado = file;
   const parsed = parsearNombreArchivo(file.name);
   if(parsed) tipoFormulario = parsed.tipo;
 
+  const cols = COLUMNAS[tipoFormulario];
+  const nuevaFila = {};
+  cols.forEach(c => nuevaFila[c.key] = "");
+  if(parsed){
+    nuevaFila.numero = parsed.numero;
+    nuevaFila.asunto = parsed.asunto;
+    nuevaFila.entidad = parsed.entidad !== "OTRO" ? parsed.entidad : "";
+  }
+  filasNuevas.unshift(nuevaFila);
+  const key = "nueva_0";
+  archivosPendientes[key] = file;
+
   renderFormulario(document.getElementById("main"));
 
-  document.getElementById("dropzoneTexto").textContent = "📄 " + file.name;
-  const msg = document.getElementById("msgForm");
-
-  if(parsed){
-    document.getElementById("fNumero").value = parsed.numero;
-    document.getElementById("fAsunto").value = parsed.asunto;
-    if(parsed.entidad !== "OTRO") document.getElementById("fEntidad").value = parsed.entidad;
-    msg.textContent = "✏️ Revisa los datos leídos del archivo antes de guardar — a veces el nombre trae errores.";
-    msg.className = "msg-form";
-  } else {
-    msg.textContent = "No pude leer el número de carta del nombre del archivo — complétalo a mano.";
-    msg.className = "msg-form err";
+  if(!parsed){
+    alert("No pude leer el número de carta del nombre del archivo — revisa y completa la fila nueva a mano.");
   }
 }
 
@@ -593,56 +660,60 @@ function archivoABase64(file){
   });
 }
 
-async function guardarCartaFormulario(){
-  const btn = document.getElementById("btnGuardar");
-  const msg = document.getElementById("msgForm");
-  msg.textContent = ""; msg.className = "msg-form";
+async function guardarFila(key){
+  const tr = document.querySelector(`tr[data-key="${key}"]`);
+  const btn = tr.querySelector(".btn-fila");
+  const cols = COLUMNAS[tipoFormulario];
+  const pin = document.getElementById("pinGuardado").value.trim();
 
-  const numero = document.getElementById("fNumero").value.trim();
-  const fechaISO = document.getElementById("fFecha").value; // yyyy-mm-dd
-  const asunto = document.getElementById("fAsunto").value.trim();
-  const entidad = document.getElementById("fEntidad").value;
-  const pin = document.getElementById("fPin").value.trim();
+  if(!pin){ alert("Escribe el PIN de acceso antes de guardar."); return; }
 
-  if(!numero || !fechaISO || !asunto || !pin){
-    msg.textContent = "Completa número, fecha, asunto y PIN.";
-    msg.classList.add("err");
-    return;
-  }
+  const valores = {};
+  cols.forEach(c => { valores[c.key] = tr.querySelector(".c-" + c.key).value.trim(); });
 
-  const [anio, mes, dia] = fechaISO.split("-");
-  const fecha = `${dia}/${mes}/${anio}`;
+  if(!valores.numero){ alert("Falta el N° de carta en esa fila."); return; }
 
-  btn.disabled = true; btn.textContent = "Guardando...";
+  btn.textContent = "⏳"; btn.disabled = true; btn.className = "btn-fila";
 
   try {
-    const body = { accion: "guardarCarta", pin, tipo: tipoFormulario, numero, fecha, asunto, entidad };
+    const body = { accion: "guardarCarta", pin, tipo: tipoFormulario, numero: valores.numero, fecha: valores.fecha, asunto: valores.asunto, entidad: valores.entidad };
+    if(tipoFormulario === "emitida"){ body.fechaRealizado = valores.fechaRealizado; body.informe = valores.informe; }
+    else { body.codigoDe = valores.codigoDe; body.para = valores.para; }
 
-    if(archivoSeleccionado){
-      body.archivoBase64 = await archivoABase64(archivoSeleccionado);
-      body.mimeType = archivoSeleccionado.type || "application/pdf";
+    if(archivosPendientes[key]){
+      body.archivoBase64 = await archivoABase64(archivosPendientes[key]);
+      body.mimeType = archivosPendientes[key].type || "application/pdf";
     }
 
     const res = await fetch(API_URL, {
       method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" }, // evita preflight CORS con Apps Script
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify(body)
     });
     const data = await res.json();
-
     if(!data.ok) throw new Error(data.error || "Error desconocido");
 
-    pinSesion = pin; // recordamos el PIN válido para la siguiente carta en esta sesión
-    archivoSeleccionado = null;
-    await cargarDatos(); // refresca los datos en memoria
+    pinSesion = pin;
+    delete archivosPendientes[key];
+    if(key.startsWith("nueva_")){
+      const idx = parseInt(key.split("_")[1], 10);
+      filasNuevas.splice(idx, 1);
+    }
+    await cargarDatos();
     renderFormulario(document.getElementById("main"));
-    document.getElementById("msgForm").textContent = "✅ Carta guardada correctamente.";
-    document.getElementById("msgForm").classList.add("ok");
   } catch (err) {
-    msg.textContent = "❌ " + err.message;
-    msg.classList.add("err");
-    btn.disabled = false; btn.textContent = "Guardar carta";
+    btn.textContent = "✕"; btn.className = "btn-fila err"; btn.disabled = false;
+    alert("Error al guardar: " + err.message);
   }
+}
+
+function archivoABase64(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 cargarDatos();
