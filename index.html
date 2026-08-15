@@ -214,18 +214,20 @@
   }
   table.grid td{ border-bottom:1px solid var(--paper-dim); padding:3px; vertical-align:top; }
   table.grid input{
-    width:100%; border:1px solid transparent; background:transparent; padding:6px; font-size:12.5px;
+    width:100%; border:1px solid transparent; background:transparent; padding:9px 8px; font-size:13.5px;
     font-family:'Inter',sans-serif; border-radius:5px;
   }
   table.grid input:focus{ border-color:var(--stamp-teal); background:var(--paper); outline:none; }
   table.grid tr.nueva td{ background:#FFF3EA; }
-  td.col-guardar{ text-align:center; width:38px; }
+  td.col-guardar{ text-align:center; width:70px; white-space:nowrap; }
   .btn-fila{
-    width:30px; height:30px; border-radius:7px; border:none; background:var(--ink); color:#fff;
-    cursor:pointer; font-size:13px;
+    width:32px; height:32px; border-radius:7px; border:none; background:var(--ink); color:#fff;
+    cursor:pointer; font-size:14px; margin:0 2px;
   }
   .btn-fila.ok{ background:var(--stamp-teal); }
   .btn-fila.err{ background:var(--stamp-orange); }
+  .btn-fila.borrar{ background:transparent; color:var(--stamp-orange); border:1.5px solid var(--stamp-orange); }
+  .btn-secundario:disabled{ opacity:.4; cursor:default; }
 </style>
 </head>
 <body>
@@ -289,6 +291,7 @@ document.querySelectorAll(".tab").forEach(t => {
     currentTab = t.dataset.tab;
     document.getElementById("chipsRecibidas").style.display = currentTab === "recibidas" ? "flex" : "none";
     document.querySelector(".searchwrap").style.display = currentTab === "editar" ? "none" : "block";
+    document.getElementById("main").style.maxWidth = currentTab === "editar" ? "1400px" : "820px";
     render();
   });
 });
@@ -481,6 +484,8 @@ function escapeHtml(str){
 // ---- Panel de control: cuadrícula tipo Excel + subidor de PDF ----
 let filasNuevas = [];        // filas en blanco/prellenadas aún no guardadas
 let archivosPendientes = {}; // key de fila -> File pendiente de subir
+let historialDeshacer = [];  // pila de snapshots de filasNuevas, para Ctrl+Z
+let ordenDescendente = false; // false = como está en el Sheet, true = últimos agregados primero
 
 const COLUMNAS = {
   emitida: [
@@ -518,6 +523,8 @@ function renderFormulario(main){
 
   const cols = COLUMNAS[tipoFormulario];
   const filasExistentes = tipoFormulario === "emitida" ? DATA.emitidas : DATA.recibidas;
+  const pares = filasExistentes.map((f, i) => ({ f, i }));
+  const paresOrdenados = ordenDescendente ? [...pares].reverse() : pares;
 
   main.innerHTML = `
     <div class="panel-header">
@@ -525,12 +532,14 @@ function renderFormulario(main){
         <button type="button" class="${tipoFormulario==='recibida'?'on':''}" onclick="cambiarTipo('recibida')">Recibidos</button>
         <button type="button" class="${tipoFormulario==='emitida'?'on':''}" onclick="cambiarTipo('emitida')">Emitidos</button>
       </div>
-      <div style="display:flex;gap:8px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn-secundario" onclick="toggleOrden()">↕ ${ordenDescendente ? "Últimos agregados primero" : "Como está en el Sheet"}</button>
+        <button class="btn-secundario" onclick="deshacer()" ${historialDeshacer.length===0?"disabled":""}>↩ Deshacer (Ctrl+Z)</button>
         <button class="btn-secundario" onclick="agregarFilaVacia()">+ Nueva fila</button>
       </div>
     </div>
 
-    <label>📥 Subir PDF (autocompleta una fila nueva)</label>
+    <label>📥 Subir PDF (agrega una fila nueva al final, ya prellenada)</label>
     <div class="dropzone" id="dropzone">
       <span class="icono">📄</span>
       <span class="texto" id="dropzoneTexto">Arrastra el PDF aquí, o toca para elegirlo</span>
@@ -541,11 +550,11 @@ function renderFormulario(main){
       <table class="grid">
         <thead><tr>
           ${cols.map(c => `<th style="${c.ancho!=='auto'?'width:'+c.ancho:''}">${c.label}</th>`).join("")}
-          <th style="width:38px"></th>
+          <th style="width:70px"></th>
         </tr></thead>
         <tbody id="cuerpoGrid">
+          ${paresOrdenados.map(p => filaHTML(p.f, cols, "existente_"+p.i, false)).join("")}
           ${filasNuevas.map((f, i) => filaHTML(f, cols, "nueva_"+i, true)).join("")}
-          ${filasExistentes.map((f, i) => filaHTML(f, cols, "existente_"+i, false)).join("")}
         </tbody>
       </table>
     </div>
@@ -567,13 +576,45 @@ function renderFormulario(main){
 function filaHTML(f, cols, key, esNueva){
   const celdas = cols.map(c => `<td><input class="c-${c.key}" value="${escapeAtributo(f[c.key] || "")}"></td>`).join("");
   const tieneArchivo = archivosPendientes[key] ? " 📎" : "";
+  const botonBorrar = esNueva ? `<button class="btn-fila borrar" onclick="eliminarFilaNueva('${key}')" title="Quitar fila">✕</button>` : "";
   return `<tr data-key="${key}" class="${esNueva ? 'nueva' : ''}">
     ${celdas}
-    <td class="col-guardar"><button class="btn-fila" onclick="guardarFila('${key}')" title="Guardar fila">💾${tieneArchivo}</button></td>
+    <td class="col-guardar"><button class="btn-fila" onclick="guardarFila('${key}')" title="Guardar fila">💾${tieneArchivo}</button>${botonBorrar}</td>
   </tr>`;
 }
 
 function escapeAtributo(str){ return escapeHtml(str).replace(/"/g, "&quot;"); }
+
+function guardarHistorial(){
+  historialDeshacer.push(JSON.parse(JSON.stringify(filasNuevas)));
+  if(historialDeshacer.length > 25) historialDeshacer.shift();
+}
+
+function deshacer(){
+  if(historialDeshacer.length === 0) return;
+  filasNuevas = historialDeshacer.pop();
+  renderFormulario(document.getElementById("main"));
+}
+
+function eliminarFilaNueva(key){
+  guardarHistorial();
+  const idx = parseInt(key.split("_")[1], 10);
+  filasNuevas.splice(idx, 1);
+  delete archivosPendientes[key];
+  renderFormulario(document.getElementById("main"));
+}
+
+function toggleOrden(){
+  ordenDescendente = !ordenDescendente;
+  renderFormulario(document.getElementById("main"));
+}
+
+document.addEventListener("keydown", (e) => {
+  if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && currentTab === "editar"){
+    e.preventDefault();
+    deshacer();
+  }
+});
 
 function intentarDesbloquear(){
   const val = document.getElementById("pinEntrada").value.trim();
@@ -590,10 +631,11 @@ function cambiarTipo(tipo){
 }
 
 function agregarFilaVacia(){
+  guardarHistorial();
   const cols = COLUMNAS[tipoFormulario];
   const vacia = {};
   cols.forEach(c => vacia[c.key] = "");
-  filasNuevas.unshift(vacia);
+  filasNuevas.push(vacia);
   renderFormulario(document.getElementById("main"));
 }
 
@@ -632,6 +674,7 @@ function manejarArchivo(file){
   const parsed = parsearNombreArchivo(file.name);
   if(parsed) tipoFormulario = parsed.tipo;
 
+  guardarHistorial();
   const cols = COLUMNAS[tipoFormulario];
   const nuevaFila = {};
   cols.forEach(c => nuevaFila[c.key] = "");
@@ -640,14 +683,14 @@ function manejarArchivo(file){
     nuevaFila.asunto = parsed.asunto;
     nuevaFila.entidad = parsed.entidad !== "OTRO" ? parsed.entidad : "";
   }
-  filasNuevas.unshift(nuevaFila);
-  const key = "nueva_0";
+  filasNuevas.push(nuevaFila);
+  const key = "nueva_" + (filasNuevas.length - 1);
   archivosPendientes[key] = file;
 
   renderFormulario(document.getElementById("main"));
 
   if(!parsed){
-    alert("No pude leer el número de carta del nombre del archivo — revisa y completa la fila nueva a mano.");
+    alert("No pude leer el número de carta del nombre del archivo — revisa y completa la fila nueva (al final de la tabla) a mano.");
   }
 }
 
