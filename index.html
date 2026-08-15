@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Registro de Cartas — Consorcio Cerro Azul</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#1B2A41">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cartas CCA">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F6F3EC;
+    --paper-dim:#EAE5D8;
+    --ink:#1B2A41;
+    --ink-soft:#4B5A70;
+    --stamp-orange:#E8590C;
+    --stamp-teal:#1F6F78;
+    --line:#D8D0BC;
+    --card:#FFFFFF;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    -webkit-tap-highlight-color:transparent;
+  }
+  header{
+    position:sticky; top:0; z-index:20;
+    background:var(--ink);
+    color:var(--paper);
+    padding:14px 16px 0 16px;
+  }
+  .titlebar{
+    display:flex; align-items:baseline; justify-content:space-between;
+    margin-bottom:10px;
+  }
+  .titlebar h1{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:18px; margin:0; letter-spacing:.2px;
+  }
+  .titlebar .sub{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px; color:#B9C2CE; opacity:.85;
+  }
+  .tabs{
+    display:flex; gap:4px; overflow-x:auto;
+  }
+  .tab{
+    flex:0 0 auto;
+    padding:10px 14px 12px 14px;
+    font-family:'Space Grotesk',sans-serif;
+    font-size:13px; font-weight:600;
+    color:#B9C2CE;
+    border-bottom:3px solid transparent;
+    cursor:pointer; white-space:nowrap;
+  }
+  .tab.active{
+    color:#fff;
+    border-bottom:3px solid var(--stamp-orange);
+  }
+  .searchwrap{
+    position:sticky; top:66px; z-index:19;
+    background:var(--paper);
+    padding:12px 16px 8px 16px;
+    border-bottom:1px solid var(--line);
+  }
+  #buscador{
+    width:100%; padding:13px 14px;
+    font-size:16px; font-family:'Inter',sans-serif;
+    border:2px solid var(--ink); border-radius:10px;
+    background:var(--card);
+  }
+  #buscador:focus{ outline:2px solid var(--stamp-teal); }
+  .chips{
+    display:flex; gap:8px; margin-top:10px; overflow-x:auto;
+  }
+  .chip{
+    flex:0 0 auto;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11.5px; font-weight:600;
+    padding:6px 12px; border-radius:20px;
+    border:1.5px solid var(--ink-soft);
+    color:var(--ink-soft);
+    cursor:pointer; background:transparent;
+  }
+  .chip.on{
+    background:var(--ink); color:var(--paper); border-color:var(--ink);
+  }
+  main{ padding:14px 16px 60px 16px; max-width:820px; margin:0 auto; }
+  .count{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px; color:var(--ink-soft); margin:4px 2px 14px 2px;
+  }
+  .card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:14px 16px;
+    margin-bottom:12px;
+    position:relative;
+    overflow:hidden;
+  }
+  .card-top{
+    display:flex; align-items:center; gap:10px; margin-bottom:6px;
+  }
+  .numero{
+    font-family:'IBM Plex Mono',monospace;
+    font-weight:600; font-size:13.5px;
+    background:var(--ink); color:var(--paper);
+    padding:3px 9px; border-radius:6px;
+  }
+  .fecha{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px; color:var(--ink-soft);
+  }
+  .asunto{ font-size:14.5px; line-height:1.4; margin:4px 0 8px 0; }
+  .stamp{
+    position:absolute; top:10px; right:12px;
+    font-family:'Space Grotesk',sans-serif;
+    font-size:9.5px; font-weight:700; letter-spacing:.5px;
+    text-transform:uppercase;
+    padding:4px 8px; border-radius:5px;
+    transform:rotate(4deg);
+    border:1.5px solid currentColor;
+    opacity:.85;
+  }
+  .stamp.municipalidad{ color:#B8860B; }
+  .stamp.supervision{ color:var(--stamp-teal); }
+  .stamp.otros{ color:var(--ink-soft); }
+  .stamp.emitida{ color:var(--stamp-orange); }
+  a.link{
+    display:inline-flex; align-items:center; gap:6px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px; font-weight:600;
+    color:var(--stamp-teal); text-decoration:none;
+  }
+  a.link:active{ opacity:.6; }
+  .bloque{
+    border:1px solid var(--line); border-radius:12px;
+    margin-bottom:16px; overflow:hidden;
+  }
+  .bloque-header{
+    padding:10px 14px; font-family:'Space Grotesk',sans-serif;
+    font-weight:700; font-size:14px; color:#fff;
+  }
+  .bloque-subtitulo{
+    font-family:'Inter',sans-serif; font-weight:500;
+    font-size:12px; margin-top:3px; opacity:.92;
+    text-transform:none; letter-spacing:0; line-height:1.35;
+  }
+  .bloque-fila{
+    display:grid; grid-template-columns:78px 1fr;
+    gap:10px; padding:8px 14px; font-size:13px;
+    border-top:1px solid var(--paper-dim);
+  }
+  .bloque-fila .label{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft); }
+  .estado{ text-align:center; padding:60px 20px; color:var(--ink-soft); font-size:14px; }
+  .estado.error{ color:var(--stamp-orange); }
+
+  .formulario{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .formulario label{ display:block; font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:var(--ink-soft); margin:14px 0 5px 0; }
+  .formulario label:first-child{ margin-top:0; }
+  .formulario input[type=text], .formulario input[type=date], .formulario input[type=password],
+  .formulario textarea, .formulario select{
+    width:100%; padding:11px 12px; font-size:15px; font-family:'Inter',sans-serif;
+    border:1.5px solid var(--line); border-radius:8px; background:var(--paper);
+  }
+  .formulario textarea{ resize:vertical; min-height:70px; }
+  .segmentado{ display:flex; gap:8px; }
+  .segmentado button{
+    flex:1; padding:10px; border-radius:8px; border:1.5px solid var(--ink);
+    background:transparent; color:var(--ink); font-weight:600; font-size:13px; cursor:pointer;
+  }
+  .segmentado button.on{ background:var(--ink); color:var(--paper); }
+  .btn-guardar{
+    width:100%; margin-top:18px; padding:14px; border-radius:10px; border:none;
+    background:var(--stamp-orange); color:#fff; font-weight:700; font-size:15px; cursor:pointer;
+  }
+  .btn-guardar:disabled{ opacity:.5; }
+  .msg-form{ margin-top:12px; font-size:13px; text-align:center; }
+  .msg-form.ok{ color:var(--stamp-teal); }
+  .msg-form.err{ color:var(--stamp-orange); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="titlebar">
+    <h1>Registro de Cartas</h1>
+    <span class="sub">CONSORCIO CERRO AZUL</span>
+  </div>
+  <div class="tabs">
+    <div class="tab active" data-tab="recibidas">Recibidas</div>
+    <div class="tab" data-tab="emitidas">Emitidas</div>
+    <div class="tab" data-tab="consultas">Consultas</div>
+    <div class="tab" data-tab="editar">+ Agregar</div>
+  </div>
+</header>
+
+<div class="searchwrap">
+  <input id="buscador" type="text" placeholder="Buscar por N°, asunto, fecha, entidad..." autocomplete="off">
+  <div class="chips" id="chipsRecibidas">
+    <div class="chip" data-ent="MUNICIPALIDA">Municipalidad</div>
+    <div class="chip" data-ent="ANANEA">Supervisión</div>
+    <div class="chip" data-ent="OTROS">Otros</div>
+  </div>
+</div>
+
+<main id="main">
+  <div class="estado" id="estadoCarga">Cargando datos desde Google Sheets...</div>
+</main>
+
+<script>
+// =====================================================================
+// PEGA AQUÍ LA URL DE TU APPS SCRIPT WEB APP (después de "Implementar")
+// =====================================================================
+const API_URL = "https://script.google.com/macros/s/AKfycbwdZJSTgOjqlIad6Av3lRfw7jgELmS4vCzk7SHByXhJ2KbtNXvgeR6jGiCnfKEektMb0w/exec";
+
+let DATA = { emitidas: [], recibidas: [] };
+let currentTab = "recibidas";
+let entidadFiltro = null;
+let tipoFormulario = "recibida";
+
+async function cargarDatos() {
+  try {
+    const res = await fetch(API_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    DATA = await res.json();
+    render();
+  } catch (err) {
+    document.getElementById("main").innerHTML =
+      `<div class="estado error">No se pudo cargar la información.<br>Revisa que la URL del API_URL en el código sea correcta y que el despliegue esté activo.<br><br><span style="font-family:'IBM Plex Mono',monospace;font-size:11px">${err.message}</span></div>`;
+  }
+}
+
+document.querySelectorAll(".tab").forEach(t => {
+  t.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    currentTab = t.dataset.tab;
+    document.getElementById("chipsRecibidas").style.display = currentTab === "recibidas" ? "flex" : "none";
+    document.querySelector(".searchwrap").style.display = currentTab === "editar" ? "none" : "block";
+    render();
+  });
+});
+
+document.querySelectorAll(".chip").forEach(c => {
+  c.addEventListener("click", () => {
+    const val = c.dataset.ent;
+    if (entidadFiltro === val) { entidadFiltro = null; c.classList.remove("on"); }
+    else {
+      document.querySelectorAll(".chip").forEach(x => x.classList.remove("on"));
+      entidadFiltro = val; c.classList.add("on");
+    }
+    render();
+  });
+});
+
+document.getElementById("buscador").addEventListener("input", render);
+
+function textoCoincide(campos, termino){
+  if(!termino) return true;
+  const t = termino.toUpperCase();
+  return campos.some(c => String(c||"").toUpperCase().includes(t));
+}
+
+function render(){
+  const termino = document.getElementById("buscador").value.trim();
+  const main = document.getElementById("main");
+
+  if(currentTab === "recibidas") return renderLista(DATA.recibidas, termino, main, "recibida");
+  if(currentTab === "emitidas") return renderLista(DATA.emitidas, termino, main, "emitida");
+  if(currentTab === "consultas") return renderConsultas(termino, main);
+  if(currentTab === "editar") return renderFormulario(main);
+}
+
+function renderLista(lista, termino, main, tipo){
+  let filtrada = lista.filter(item => {
+    const campos = [item.numero, item.fecha, item.asunto, item.entidad || ""];
+    const coincideTexto = textoCoincide(campos, termino);
+    let coincideEntidad = true;
+    if(tipo === "recibida" && entidadFiltro){
+      const ent = (item.entidad||"").toUpperCase();
+      if(entidadFiltro === "OTROS") coincideEntidad = !ent.includes("MUNICIPALIDA") && !ent.includes("ANANEA");
+      else coincideEntidad = ent.includes(entidadFiltro);
+    }
+    return coincideTexto && coincideEntidad;
+  });
+
+  let html = `<div class="count">${filtrada.length} carta${filtrada.length===1?"":"s"} encontrada${filtrada.length===1?"":"s"}</div>`;
+
+  if(filtrada.length === 0){
+    html += mensajeVacio(termino, entidadFiltro);
+  } else {
+    filtrada.forEach(item => {
+      const stampClass = tipo === "emitida" ? "emitida" :
+        (item.entidad||"").toUpperCase().includes("MUNICIPALIDA") ? "municipalidad" :
+        (item.entidad||"").toUpperCase().includes("ANANEA") ? "supervision" : "otros";
+      const stampText = tipo === "emitida" ? "EMITIDA" :
+        (item.entidad||"").toUpperCase().includes("MUNICIPALIDA") ? "MUNICIPALIDAD" :
+        (item.entidad||"").toUpperCase().includes("ANANEA") ? "SUPERVISIÓN" : "OTRO";
+
+      html += `
+        <div class="card">
+          <span class="stamp ${stampClass}">${stampText}</span>
+          <div class="card-top">
+            <span class="numero">N° ${item.numero}</span>
+            <span class="fecha">${item.fecha}</span>
+          </div>
+          <div class="asunto">${escapeHtml(item.asunto)}</div>
+          ${item.link ? `<a class="link" href="${item.link}" target="_blank" rel="noopener">📄 Ver PDF →</a>` : ""}
+        </div>`;
+    });
+  }
+  main.innerHTML = html;
+}
+
+// ---- Cruce de Consultas (replica ejecutarCruceDeDatos, en JS) ----
+// La 1ra carta que menciona "CONSULTA N°X" (recorriendo Emitidas en orden)
+// queda FIJA como EMITIDA. Todo lo demás (más emitidas + recibidas) son
+// seguimientos, y esos sí se ordenan por fecha real (no como texto).
+const REGEX_CONSULTA = /CONSULTA[S]?[^\d]*((?:\d+[\s,yYeEnN°º]*)+)/i;
+
+function fechaAValor(fechaStr){
+  if(!fechaStr) return 0;
+  const partes = String(fechaStr).trim().split("/");
+  if(partes.length === 3){
+    const t = new Date(partes[2], partes[1] - 1, partes[0]).getTime();
+    return isNaN(t) ? 0 : t;
+  }
+  const t = new Date(fechaStr).getTime();
+  return isNaN(t) ? 0 : t;
+}
+
+function construirConsultas(){
+  const dict = {};
+
+  DATA.emitidas.forEach(item => {
+    const m = String(item.asunto || "").match(REGEX_CONSULTA);
+    if(!m) return;
+    const nums = m[1].match(/\d+/g) || [];
+    nums.forEach(nStr => {
+      const n = parseInt(nStr, 10);
+      if(!dict[n]) dict[n] = { emitida: item, seguimientos: [] };
+      else dict[n].seguimientos.push(item);
+    });
+  });
+
+  DATA.recibidas.forEach(item => {
+    const m = String(item.asunto || "").match(REGEX_CONSULTA);
+    if(!m) return;
+    const nums = m[1].match(/\d+/g) || [];
+    nums.forEach(nStr => {
+      const n = parseInt(nStr, 10);
+      if(dict[n]) dict[n].seguimientos.push(item);
+    });
+  });
+
+  Object.values(dict).forEach(c => {
+    c.seguimientos.sort((a, b) => fechaAValor(a.fecha) - fechaAValor(b.fecha));
+  });
+
+  return dict;
+}
+
+function filaBloque(label, it){
+  return `<div class="bloque-fila">
+    <span class="label">${label}</span>
+    <span>N° ${it.numero} — ${it.fecha} — ${escapeHtml(it.asunto)}
+      ${it.link ? ` · <a class="link" href="${it.link}" target="_blank" rel="noopener">PDF →</a>` : ""}
+    </span>
+  </div>`;
+}
+
+function renderConsultas(termino, main){
+  const dict = construirConsultas();
+  const claves = Object.keys(dict).map(Number).sort((a, b) => a - b);
+  const paleta = ["#E8590C","#1F6F78","#B8860B","#4B5A70"];
+  let html = "";
+  let visibles = 0;
+
+  claves.forEach((num, idx) => {
+    const c = dict[num];
+    const todos = [c.emitida, ...c.seguimientos];
+    const campos = todos.flatMap(i => [i.numero, i.fecha, i.asunto, i.entidad || ""]);
+    if(!textoCoincide(["CONSULTA " + num, ...campos], termino)) return;
+    visibles++;
+    const color = paleta[idx % paleta.length];
+
+    html += `<div class="bloque">
+      <div class="bloque-header" style="background:${color}">
+        CONSULTA N° ${String(num).padStart(2, "0")}
+        <div class="bloque-subtitulo">${escapeHtml(c.emitida.asunto)}</div>
+      </div>`;
+    html += filaBloque("EMITIDA", c.emitida);
+    c.seguimientos.forEach((it, i) => { html += filaBloque("SEGUIM. " + (i + 1), it); });
+    html += `</div>`;
+  });
+
+  main.innerHTML = `<div class="count">${visibles} consulta${visibles===1?"":"s"} encontrada${visibles===1?"":"s"}</div>` +
+    (visibles === 0 ? mensajeVacio(termino, null) : html);
+}
+
+function mensajeVacio(termino, entidadFiltro){
+  const totalCargado = DATA.recibidas.length + DATA.emitidas.length;
+
+  if(totalCargado === 0){
+    return `<div class="estado error">No se cargó ninguna carta desde Google Sheets.<br>
+      Esto normalmente es un problema de conexión, no de datos.<br>
+      <button onclick="location.reload()" style="margin-top:10px;padding:8px 16px;border-radius:8px;border:2px solid var(--stamp-orange);background:transparent;color:var(--stamp-orange);font-weight:600;">🔄 Reintentar</button></div>`;
+  }
+
+  let detalle = [];
+  if(termino) detalle.push(`buscando "<b>${escapeHtml(termino)}</b>"`);
+  if(entidadFiltro) detalle.push(`con el filtro "<b>${entidadFiltro === "OTROS" ? "Otros" : entidadFiltro === "MUNICIPALIDA" ? "Municipalidad" : "Supervisión"}</b>" activo`);
+
+  return `<div class="estado">
+    Sin resultados ${detalle.length ? detalle.join(" y ") : ""}.<br>
+    <span style="font-size:12px">(Sí hay ${totalCargado} cartas cargadas en total — solo no coinciden con esto)</span><br>
+    <button onclick="document.getElementById('buscador').value='';entidadFiltro=null;document.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));render();"
+      style="margin-top:10px;padding:8px 16px;border-radius:8px;border:2px solid var(--ink);background:transparent;color:var(--ink);font-weight:600;">✕ Limpiar búsqueda y filtros</button>
+  </div>`;
+}
+
+function escapeHtml(str){
+  return String(str||"").replace(/[&<>"']/g, m => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[m]));
+}
+
+// ---- Formulario: Agregar / Editar carta ----
+function renderFormulario(main){
+  main.innerHTML = `
+    <div class="formulario">
+      <label>Tipo de carta</label>
+      <div class="segmentado">
+        <button type="button" id="btnTipoRecibida" class="${tipoFormulario==='recibida'?'on':''}" onclick="cambiarTipo('recibida')">Recibida</button>
+        <button type="button" id="btnTipoEmitida" class="${tipoFormulario==='emitida'?'on':''}" onclick="cambiarTipo('emitida')">Emitida</button>
+      </div>
+
+      <label>N° de carta</label>
+      <input type="text" id="fNumero" inputmode="numeric" placeholder="Ej: 345">
+
+      <label>Fecha</label>
+      <input type="date" id="fFecha">
+
+      <label>Asunto</label>
+      <textarea id="fAsunto" placeholder="Describe brevemente el contenido de la carta"></textarea>
+
+      <div id="wrapEntidad" style="${tipoFormulario==='emitida'?'display:none':''}">
+        <label>Entidad</label>
+        <select id="fEntidad">
+          <option value="MUNICIPALIDAD DE CIUDAD NUEVA">Municipalidad</option>
+          <option value="CONSORCIO ANANEA (SUPERVISION)">Supervisión (Ananea)</option>
+          <option value="OTRO">Otro</option>
+        </select>
+      </div>
+
+      <label>Archivo PDF (opcional)</label>
+      <input type="file" id="fArchivo" accept="application/pdf">
+
+      <label>PIN de acceso</label>
+      <input type="password" id="fPin" inputmode="numeric" placeholder="Solo para guardar cambios">
+
+      <button class="btn-guardar" id="btnGuardar" onclick="guardarCartaFormulario()">Guardar carta</button>
+      <div class="msg-form" id="msgForm"></div>
+    </div>`;
+}
+
+function cambiarTipo(tipo){
+  tipoFormulario = tipo;
+  renderFormulario(document.getElementById("main"));
+}
+
+function archivoABase64(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function guardarCartaFormulario(){
+  const btn = document.getElementById("btnGuardar");
+  const msg = document.getElementById("msgForm");
+  msg.textContent = ""; msg.className = "msg-form";
+
+  const numero = document.getElementById("fNumero").value.trim();
+  const fechaISO = document.getElementById("fFecha").value; // yyyy-mm-dd
+  const asunto = document.getElementById("fAsunto").value.trim();
+  const entidad = tipoFormulario === "recibida" ? document.getElementById("fEntidad").value : "";
+  const pin = document.getElementById("fPin").value.trim();
+  const archivoInput = document.getElementById("fArchivo");
+
+  if(!numero || !fechaISO || !asunto || !pin){
+    msg.textContent = "Completa número, fecha, asunto y PIN.";
+    msg.classList.add("err");
+    return;
+  }
+
+  const [anio, mes, dia] = fechaISO.split("-");
+  const fecha = `${dia}/${mes}/${anio}`;
+
+  btn.disabled = true; btn.textContent = "Guardando...";
+
+  try {
+    const body = { accion: "guardarCarta", pin, tipo: tipoFormulario, numero, fecha, asunto, entidad };
+
+    if(archivoInput.files[0]){
+      body.archivoBase64 = await archivoABase64(archivoInput.files[0]);
+      body.mimeType = archivoInput.files[0].type || "application/pdf";
+    }
+
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" }, // evita preflight CORS con Apps Script
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+
+    msg.textContent = "✅ Carta guardada correctamente.";
+    msg.classList.add("ok");
+    document.getElementById("fNumero").value = "";
+    document.getElementById("fAsunto").value = "";
+    archivoInput.value = "";
+    await cargarDatos(); // refresca los datos en memoria
+  } catch (err) {
+    msg.textContent = "❌ " + err.message;
+    msg.classList.add("err");
+  } finally {
+    btn.disabled = false; btn.textContent = "Guardar carta";
+  }
+}
+
+cargarDatos();
+
+if("serviceWorker" in navigator){
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
