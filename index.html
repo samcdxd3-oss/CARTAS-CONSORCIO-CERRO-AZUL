@@ -752,6 +752,7 @@ async function manejarArchivo(file){
   document.getElementById("dropzone").classList.add("arrastrando");
 
   let parsed = null;
+  let textoLeido = "";
   try {
     const base64 = await archivoABase64(file);
     const res = await fetch(API_URL, {
@@ -760,7 +761,7 @@ async function manejarArchivo(file){
       body: JSON.stringify({ accion: "leerPDF", pin: pinSesion, archivoBase64: base64, mimeType: file.type || "application/pdf" })
     });
     const data = await res.json();
-    if(data.ok) parsed = data.datos;
+    if(data.ok){ parsed = data.datos; textoLeido = data.textoLeido || ""; }
     else console.warn("No se pudo leer el PDF:", data.error);
   } catch (e) {
     console.warn("Error de lectura OCR:", e);
@@ -782,7 +783,7 @@ async function manejarArchivo(file){
   renderFormulario(document.getElementById("main"));
 
   if(!parsed || !parsed.numero){
-    alert("El OCR no pudo leer bien el número/asunto de este documento — revisa y completa la fila nueva (al final de la tabla) a mano.");
+    alert("El OCR no pudo identificar bien el número/asunto. Esto es lo que alcanzó a leer del documento (primeros caracteres):\n\n" + (textoLeido || "(no se leyó nada — revisa si el PDF es una imagen escaneada legible)") + "\n\nRevisa y completa la fila nueva (al final de la tabla) a mano. Si me pasas este texto, puedo ajustar el reconocimiento.");
   }
 }
 
