@@ -237,6 +237,28 @@
     background:var(--ink); color:var(--paper); font-size:20px;
     box-shadow:0 4px 14px rgba(0,0,0,.25); cursor:pointer; display:none;
   }
+
+  .overlay-modal{
+    position:fixed; inset:0; background:rgba(10,60,139,.45);
+    z-index:50; display:flex; align-items:center; justify-content:center; padding:16px;
+  }
+  .modal-panel{
+    background:var(--card); border-radius:14px; padding:20px;
+    max-width:460px; width:100%; max-height:88vh; overflow-y:auto;
+    box-shadow:0 12px 40px rgba(0,0,0,.3);
+  }
+  .modal-panel h3{ font-family:'Space Grotesk',sans-serif; font-size:16px; margin:0 0 4px 0; color:var(--ink); }
+  .modal-panel .archivo-nombre{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft); margin-bottom:14px; word-break:break-all; }
+  .modal-panel label{ display:block; font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft); margin:12px 0 4px 0; }
+  .modal-panel input, .modal-panel select, .modal-panel textarea{
+    width:100%; padding:10px 11px; font-size:14.5px; font-family:'Inter',sans-serif;
+    border:1.5px solid var(--line); border-radius:8px; background:var(--paper);
+  }
+  .modal-botones{ display:flex; gap:10px; margin-top:18px; }
+  .modal-botones button{ flex:1; padding:12px; border-radius:9px; font-weight:700; font-size:14px; cursor:pointer; border:none; }
+  .modal-botones .cancelar{ background:transparent; border:1.5px solid var(--ink-soft); color:var(--ink-soft); }
+  .modal-botones .confirmar{ background:var(--stamp-orange); color:#fff; }
+  .modal-aviso{ font-size:12px; color:var(--ink-soft); background:var(--paper-dim); padding:8px 10px; border-radius:8px; margin-top:4px; }
 </style>
 </head>
 <body>
@@ -748,8 +770,6 @@ function parsearNombreArchivo(nombreOriginal){
 }
 
 async function manejarArchivo(file){
-  guardarHistorial();
-
   document.getElementById("dropzoneTexto").textContent = "🔍 Leyendo el documento con OCR (unos segundos)...";
   document.getElementById("dropzone").classList.add("arrastrando");
 
@@ -770,27 +790,116 @@ async function manejarArchivo(file){
     errorServidor = "Error de conexión: " + e.message;
   }
 
-  if(parsed && parsed.tipo) tipoFormulario = parsed.tipo;
-  const cols = COLUMNAS[tipoFormulario];
-  const nuevaFila = {};
-  cols.forEach(c => nuevaFila[c.key] = "");
-  if(parsed){
-    if(parsed.numero) nuevaFila.numero = parsed.numero;
-    if(parsed.asunto) nuevaFila.asunto = parsed.asunto;
-    if(parsed.entidad) nuevaFila.entidad = parsed.entidad;
-  }
-  filasNuevas.push(nuevaFila);
-  const key = "nueva_" + (filasNuevas.length - 1);
-  archivosPendientes[key] = file;
+  document.getElementById("dropzoneTexto").textContent = "Arrastra el PDF aquí, o toca para elegirlo";
+  document.getElementById("dropzone").classList.remove("arrastrando");
 
-  renderFormulario(document.getElementById("main"));
+  abrirModalRevision(file, parsed, textoLeido, errorServidor);
+}
 
-  if(!parsed || !parsed.numero){
-    if(errorServidor){
-      alert("El servidor no pudo procesar el PDF. Este es el error exacto — mándamelo tal cual para que lo arregle:\n\n" + errorServidor);
-    } else {
-      alert("El OCR no pudo identificar bien el número/asunto. Esto es lo que alcanzó a leer del documento (primeros caracteres):\n\n" + (textoLeido || "(no se leyó nada — revisa si el PDF es una imagen escaneada legible)") + "\n\nRevisa y completa la fila nueva (al final de la tabla) a mano. Si me pasas este texto, puedo ajustar el reconocimiento.");
+function abrirModalRevision(file, parsed, textoLeido, errorServidor){
+  const tipo = (parsed && parsed.tipo) || tipoFormulario;
+  const overlay = document.createElement("div");
+  overlay.className = "overlay-modal";
+  overlay.id = "modalRevision";
+
+  overlay.innerHTML = `
+    <div class="modal-panel">
+      <h3>📄 Revisa antes de guardar</h3>
+      <div class="archivo-nombre">${escapeHtml(file.name)}</div>
+
+      ${errorServidor ? `<div class="modal-aviso">⚠️ El servidor no pudo leer el documento (${escapeHtml(errorServidor)}). Completa los datos a mano.</div>` : ""}
+      ${!errorServidor && (!parsed || !parsed.numero) ? `<div class="modal-aviso">🔍 El OCR no identificó bien el número — revisa y completa a mano.<br><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;">${escapeHtml(textoLeido).substring(0,200) || "(no se leyó texto)"}</span></div>` : ""}
+
+      <label>Tipo de carta</label>
+      <div class="segmentado">
+        <button type="button" id="mTipoRecibida" class="${tipo==='emitida'?'':'on'}" onclick="cambiarTipoModal('recibida')">Recibida</button>
+        <button type="button" id="mTipoEmitida" class="${tipo==='emitida'?'on':''}" onclick="cambiarTipoModal('emitida')">Emitida</button>
+      </div>
+
+      <label>N° de carta</label>
+      <input type="text" id="mNumero" value="${escapeAtributo(parsed && parsed.numero || "")}" inputmode="numeric">
+
+      <label>Fecha</label>
+      <input type="date" id="mFecha">
+
+      <label>Asunto</label>
+      <textarea id="mAsunto" rows="3">${escapeHtml(parsed && parsed.asunto || "")}</textarea>
+
+      <div id="mWrapEntidad">
+        <label id="mLabelEntidad">${tipo === 'emitida' ? 'Dirigida a (entidad)' : 'Entidad remitente'}</label>
+        <select id="mEntidad">
+          <option value="MUNICIPALIDAD DE CIUDAD NUEVA" ${(parsed&&parsed.entidad)==='MUNICIPALIDAD DE CIUDAD NUEVA'?'selected':''}>Municipalidad</option>
+          <option value="CONSORCIO ANANEA (SUPERVISION)" ${(parsed&&parsed.entidad)==='CONSORCIO ANANEA (SUPERVISION)'?'selected':''}>Supervisión (Ananea)</option>
+          <option value="OTRO">Otro</option>
+        </select>
+      </div>
+
+      <div class="modal-botones">
+        <button class="cancelar" onclick="cerrarModalRevision()">Cancelar</button>
+        <button class="confirmar" id="btnConfirmarModal" onclick="confirmarGuardarModal()">✅ Guardar carta</button>
+      </div>
+      <div class="msg-form" id="msgModal"></div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  window._archivoModalActual = file;
+  window._tipoModalActual = tipo;
+}
+
+function cambiarTipoModal(tipo){
+  window._tipoModalActual = tipo;
+  document.getElementById("mTipoRecibida").classList.toggle("on", tipo === "recibida");
+  document.getElementById("mTipoEmitida").classList.toggle("on", tipo === "emitida");
+  document.getElementById("mLabelEntidad").textContent = tipo === "emitida" ? "Dirigida a (entidad)" : "Entidad remitente";
+}
+
+function cerrarModalRevision(){
+  const modal = document.getElementById("modalRevision");
+  if(modal) modal.remove();
+  window._archivoModalActual = null;
+}
+
+async function confirmarGuardarModal(){
+  if(!pinSesion){ alert("Sesión sin PIN — cierra este panel y vuelve a entrar."); return; }
+
+  const numero = document.getElementById("mNumero").value.trim();
+  const fechaISO = document.getElementById("mFecha").value;
+  const asunto = document.getElementById("mAsunto").value.trim();
+  const entidad = document.getElementById("mEntidad").value;
+  const tipo = window._tipoModalActual;
+  const msg = document.getElementById("msgModal");
+
+  if(!numero){ msg.textContent = "Falta el N° de carta."; msg.className = "msg-form err"; return; }
+
+  const btn = document.getElementById("btnConfirmarModal");
+  btn.disabled = true; btn.textContent = "Guardando...";
+
+  try {
+    let fecha = "";
+    if(fechaISO){ const [a,m,d] = fechaISO.split("-"); fecha = `${d}/${m}/${a}`; }
+
+    const body = { accion: "guardarCarta", pin: pinSesion, tipo, numero, fecha, asunto, entidad };
+    if(window._archivoModalActual){
+      body.archivoBase64 = await archivoABase64(window._archivoModalActual);
+      body.mimeType = window._archivoModalActual.type || "application/pdf";
     }
+
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+
+    tipoFormulario = tipo;
+    cerrarModalRevision();
+    await cargarDatos();
+    renderFormulario(document.getElementById("main"));
+  } catch (err) {
+    msg.textContent = "❌ " + err.message;
+    msg.className = "msg-form err";
+    btn.disabled = false; btn.textContent = "✅ Guardar carta";
   }
 }
 
