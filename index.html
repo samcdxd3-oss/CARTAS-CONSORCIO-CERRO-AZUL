@@ -228,6 +228,13 @@
   .btn-fila.err{ background:var(--stamp-orange); }
   .btn-fila.borrar{ background:transparent; color:var(--stamp-orange); border:1.5px solid var(--stamp-orange); }
   .btn-secundario:disabled{ opacity:.4; cursor:default; }
+
+  #btnScroll{
+    position:fixed; bottom:22px; right:18px; z-index:30;
+    width:52px; height:52px; border-radius:50%; border:none;
+    background:var(--ink); color:var(--paper); font-size:20px;
+    box-shadow:0 4px 14px rgba(0,0,0,.25); cursor:pointer; display:none;
+  }
 </style>
 </head>
 <body>
@@ -257,6 +264,8 @@
 <main id="main">
   <div class="estado" id="estadoCarga">Cargando datos desde Google Sheets...</div>
 </main>
+
+<button id="btnScroll" onclick="toggleScroll()">↓</button>
 
 <script>
 // =====================================================================
@@ -293,6 +302,7 @@ document.querySelectorAll(".tab").forEach(t => {
     document.querySelector(".searchwrap").style.display = currentTab === "editar" ? "none" : "block";
     document.getElementById("main").style.maxWidth = currentTab === "editar" ? "1400px" : "820px";
     render();
+    setTimeout(actualizarBotonScroll, 50);
   });
 });
 
@@ -533,11 +543,14 @@ function renderFormulario(main){
         <button type="button" class="${tipoFormulario==='emitida'?'on':''}" onclick="cambiarTipo('emitida')">Emitidos</button>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn-secundario" id="btnZip" onclick="descargarTodosZip()">⬇ Descargar todos (ZIP)</button>
         <button class="btn-secundario" onclick="toggleOrden()">↕ ${ordenDescendente ? "Últimos agregados primero" : "Como está en el Sheet"}</button>
         <button class="btn-secundario" onclick="deshacer()" ${historialDeshacer.length===0?"disabled":""}>↩ Deshacer (Ctrl+Z)</button>
-        <button class="btn-secundario" onclick="agregarFilaVacia()">+ Nueva fila</button>
+        ${tipoFormulario === 'emitida' ? `<button class="btn-secundario" onclick="agregarFilaVacia()">+ Nueva fila</button>` : ''}
       </div>
     </div>
+
+    ${tipoFormulario === 'recibida' ? `<p style="font-size:11.5px;color:var(--ink-soft);margin:-4px 0 10px 0;">ℹ️ Las cartas recibidas se agregan solo subiendo el PDF (abajo) — no se escriben filas a mano aquí, para que coincidan siempre con el documento real.</p>` : ''}
 
     <label>📥 Subir PDF (lo lee con OCR y agrega una fila nueva al final, ya prellenada)</label>
     <div class="dropzone" id="dropzone">
@@ -559,6 +572,8 @@ function renderFormulario(main){
       </table>
     </div>
 
+    ${tipoFormulario === 'emitida' ? `<button class="btn-secundario" style="margin-top:10px;" onclick="agregarFilaVacia()">+ Nueva fila (al final)</button>` : ''}
+
     <p style="font-size:11.5px;color:var(--ink-soft);margin-top:12px;">💾 Cada celda se guarda sola al tocar fuera de ella (como en un Excel real) — no hace falta ningún botón de guardar.</p>`;
 
   const dz = document.getElementById("dropzone");
@@ -578,7 +593,8 @@ function filaHTML(f, cols, key, esNueva){
     return `<td><input class="c-${c.key}" value="${escapeAtributo(f[c.key] || "")}" onblur="autoguardarFila('${key}')"></td>`;
   }).join("");
   const botonAbrir = `<button type="button" class="btn-fila" style="background:transparent;color:var(--stamp-teal);border:1.5px solid var(--stamp-teal);" onclick="abrirLinkFila('${key}')" title="Abrir PDF">🔗</button>`;
-  const botonBorrar = esNueva ? `<button class="btn-fila borrar" onclick="eliminarFilaNueva('${key}')" title="Quitar fila">✕</button>` : "";
+  const accionBorrar = esNueva ? `eliminarFilaNueva('${key}')` : `eliminarFilaExistente('${key}')`;
+  const botonBorrar = `<button class="btn-fila borrar" onclick="${accionBorrar}" title="Quitar esta carta">✕</button>`;
   return `<tr data-key="${key}" class="${esNueva ? 'nueva' : ''}">
     ${celdas}
     <td class="col-guardar">${botonAbrir}${botonBorrar}</td>
@@ -590,6 +606,31 @@ function abrirLinkFila(key){
   const val = tr.querySelector(".c-link").value.trim();
   if(val) window.open(val, "_blank", "noopener");
   else alert("Esta fila todavía no tiene un PDF/link guardado.");
+}
+
+async function eliminarFilaExistente(key){
+  const tr = document.querySelector(`tr[data-key="${key}"]`);
+  const numero = tr.querySelector(".c-numero").value.trim();
+  if(!confirm(`¿Quitar la carta N° ${numero} de ${tipoFormulario === 'emitida' ? 'Emitidos' : 'Recibidos'}?\n\nEsto borra la fila del Google Sheet. El PDF en Drive NO se elimina.`)) return;
+  if(!pinSesion){ alert("Sesión sin PIN — vuelve a entrar al panel."); return; }
+
+  tr.style.opacity = "0.35";
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ accion: "eliminarCarta", pin: pinSesion, tipo: tipoFormulario, numero })
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+
+    const idx = parseInt(key.split("_")[1], 10);
+    if(tipoFormulario === "emitida") DATA.emitidas.splice(idx, 1); else DATA.recibidas.splice(idx, 1);
+    renderFormulario(document.getElementById("main"));
+  } catch (err) {
+    tr.style.opacity = "1";
+    alert("No se pudo quitar la carta: " + err.message);
+  }
 }
 
 function escapeAtributo(str){ return escapeHtml(str).replace(/"/g, "&quot;"); }
@@ -632,6 +673,31 @@ function intentarDesbloquear(){
   pinSesion = val;
   panelDesbloqueado = true;
   renderFormulario(document.getElementById("main"));
+}
+
+async function descargarTodosZip(){
+  if(!pinSesion){ alert("Ingresa al panel con tu PIN primero."); return; }
+  const nombreGrupo = tipoFormulario === 'emitida' ? 'Emitidos' : 'Recibidos';
+  if(!confirm(`¿Descargar todos los PDFs de ${nombreGrupo} en un solo ZIP?\n\nSi hay muchos archivos puede tardar uno o dos minutos.`)) return;
+
+  const btn = document.getElementById("btnZip");
+  const textoOriginal = btn.textContent;
+  btn.textContent = "⏳ Generando ZIP..."; btn.disabled = true;
+
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ accion: "descargarZip", pin: pinSesion, tipo: tipoFormulario })
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+    window.open(data.url, "_blank");
+  } catch (err) {
+    alert("No se pudo generar el ZIP: " + err.message);
+  } finally {
+    btn.textContent = textoOriginal; btn.disabled = false;
+  }
 }
 
 function cambiarTipo(tipo){
@@ -778,16 +844,22 @@ async function autoguardarFila(key){
   }
 }
 
-function archivoABase64(file){
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(",")[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
 cargarDatos();
+
+// Botón flotante ir arriba/abajo — solo útil (y visible) en el panel de agregar, donde la tabla es larga
+const btnScroll = document.getElementById("btnScroll");
+function actualizarBotonScroll(){
+  if(currentTab !== "editar"){ btnScroll.style.display = "none"; return; }
+  btnScroll.style.display = "block";
+  const cercaDelFinal = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 80);
+  btnScroll.textContent = cercaDelFinal ? "↑" : "↓";
+}
+function toggleScroll(){
+  const cercaDelFinal = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 80);
+  window.scrollTo({ top: cercaDelFinal ? 0 : document.body.scrollHeight, behavior: "smooth" });
+}
+window.addEventListener("scroll", actualizarBotonScroll);
+window.addEventListener("resize", actualizarBotonScroll);
 
 // Evita que el navegador abra/navegue al archivo si se suelta cerca pero fuera de la zona de arrastre
 ["dragover", "drop"].forEach(ev => {
