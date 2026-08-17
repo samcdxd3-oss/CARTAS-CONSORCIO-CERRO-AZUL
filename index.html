@@ -244,8 +244,17 @@
   }
   .modal-panel{
     background:var(--card); border-radius:14px; padding:20px;
-    max-width:520px; width:100%; max-height:88vh; overflow-y:auto;
+    max-width:960px; width:100%; max-height:88vh; overflow-y:auto;
     box-shadow:0 12px 40px rgba(0,0,0,.3);
+  }
+  .modal-body{ display:flex; gap:20px; align-items:flex-start; }
+  .modal-preview{ flex:0 0 44%; max-height:74vh; overflow-y:auto; border-radius:8px; }
+  .modal-preview img{ width:100%; border-radius:8px; border:1px solid var(--line); display:block; }
+  .modal-fields{ flex:1; min-width:0; max-height:74vh; overflow-y:auto; padding-right:6px; }
+  @media (max-width: 760px){
+    .modal-body{ flex-direction:column; }
+    .modal-preview{ flex:none; width:100%; max-height:260px; }
+    .modal-fields{ max-height:none; overflow-y:visible; }
   }
   .modal-panel h3{ font-family:'Space Grotesk',sans-serif; font-size:16px; margin:0 0 4px 0; color:var(--ink); }
   .modal-panel .archivo-nombre{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft); margin-bottom:14px; word-break:break-all; }
@@ -811,50 +820,56 @@ function abrirModalRevision(file, parsed, textoLeido, errorServidor, imagenPrevi
       <h3>📄 Revisa antes de guardar</h3>
       <div class="archivo-nombre">${escapeHtml(file.name)}</div>
 
-      ${imagenPreview ? `<img src="${imagenPreview}" style="width:100%;border-radius:8px;border:1px solid var(--line);margin-bottom:12px;">` : `<div class="modal-aviso">No se pudo generar una vista previa de la imagen — puedes seguir corrigiendo los datos igual.</div>`}
+      <div class="modal-body">
+        <div class="modal-preview">
+          ${imagenPreview ? `<img src="${imagenPreview}">` : `<div class="modal-aviso">No se pudo generar una vista previa de la imagen — puedes seguir corrigiendo los datos igual.</div>`}
+        </div>
 
-      ${errorServidor ? `<div class="modal-aviso">⚠️ El servidor no pudo leer el documento (${escapeHtml(errorServidor)}). Completa los datos a mano.</div>` : ""}
-      ${!errorServidor && (!parsed || !parsed.numero) ? `<div class="modal-aviso">🔍 El OCR no identificó bien el número — revisa y completa a mano.<br><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;">${escapeHtml(textoLeido).substring(0,200) || "(no se leyó texto)"}</span></div>` : ""}
+        <div class="modal-fields">
+          ${errorServidor ? `<div class="modal-aviso">⚠️ El servidor no pudo leer el documento (${escapeHtml(errorServidor)}). Completa los datos a mano.</div>` : ""}
+          ${!errorServidor && (!parsed || !parsed.numero) ? `<div class="modal-aviso">🔍 El OCR no identificó bien el número — revisa y completa a mano.<br><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;">${escapeHtml(textoLeido).substring(0,200) || "(no se leyó texto)"}</span></div>` : ""}
 
-      <label>Tipo de carta</label>
-      <div class="segmentado">
-        <button type="button" id="mTipoRecibida" class="${tipo==='emitida'?'':'on'}" onclick="cambiarTipoModal('recibida')">Recibida</button>
-        <button type="button" id="mTipoEmitida" class="${tipo==='emitida'?'on':''}" onclick="cambiarTipoModal('emitida')">Emitida</button>
+          <label>Tipo de carta</label>
+          <div class="segmentado">
+            <button type="button" id="mTipoRecibida" class="${tipo==='emitida'?'':'on'}" onclick="cambiarTipoModal('recibida')">Recibida</button>
+            <button type="button" id="mTipoEmitida" class="${tipo==='emitida'?'on':''}" onclick="cambiarTipoModal('emitida')">Emitida</button>
+          </div>
+
+          <label>N° de carta</label>
+          <input type="text" id="mNumero" value="${escapeAtributo(parsed && parsed.numero || "")}" inputmode="numeric">
+
+          <label>Fecha</label>
+          <input type="date" id="mFecha">
+
+          <label>Asunto</label>
+          <textarea id="mAsunto" rows="3">${escapeHtml(parsed && parsed.asunto || "")}</textarea>
+
+          <div id="mWrapEntidad">
+            <label id="mLabelEntidad">${tipo === 'emitida' ? 'Dirigida a (entidad)' : 'Entidad remitente'}</label>
+            <select id="mEntidad" onchange="autocompletarCodigoModal()">
+              <option value="MUNICIPALIDAD DE CIUDAD NUEVA" ${(parsed&&parsed.entidad)==='MUNICIPALIDAD DE CIUDAD NUEVA'?'selected':''}>Municipalidad</option>
+              <option value="CONSORCIO ANANEA (SUPERVISION)" ${(parsed&&parsed.entidad)==='CONSORCIO ANANEA (SUPERVISION)'?'selected':''}>Supervisión (Ananea)</option>
+              <option value="OTRO">Otro</option>
+            </select>
+          </div>
+
+          <div id="mWrapCodigo" style="${tipo==='emitida'?'display:none':''}">
+            <label>Código (columna B)</label>
+            <input type="text" id="mCodigo" placeholder="Ej: GDTI - GM - MDCN - T">
+          </div>
+
+          <div id="mWrapInforme" style="${tipo==='emitida'?'':'display:none'}">
+            <label>N° Informe (opcional)</label>
+            <input type="text" id="mInforme">
+          </div>
+
+          <div class="modal-botones">
+            <button class="cancelar" onclick="cerrarModalRevision()">Cancelar</button>
+            <button class="confirmar" id="btnConfirmarModal" onclick="confirmarGuardarModal()">✅ Guardar carta</button>
+          </div>
+          <div class="msg-form" id="msgModal"></div>
+        </div>
       </div>
-
-      <label>N° de carta</label>
-      <input type="text" id="mNumero" value="${escapeAtributo(parsed && parsed.numero || "")}" inputmode="numeric">
-
-      <label>Fecha</label>
-      <input type="date" id="mFecha">
-
-      <label>Asunto</label>
-      <textarea id="mAsunto" rows="3">${escapeHtml(parsed && parsed.asunto || "")}</textarea>
-
-      <div id="mWrapEntidad">
-        <label id="mLabelEntidad">${tipo === 'emitida' ? 'Dirigida a (entidad)' : 'Entidad remitente'}</label>
-        <select id="mEntidad" onchange="autocompletarCodigoModal()">
-          <option value="MUNICIPALIDAD DE CIUDAD NUEVA" ${(parsed&&parsed.entidad)==='MUNICIPALIDAD DE CIUDAD NUEVA'?'selected':''}>Municipalidad</option>
-          <option value="CONSORCIO ANANEA (SUPERVISION)" ${(parsed&&parsed.entidad)==='CONSORCIO ANANEA (SUPERVISION)'?'selected':''}>Supervisión (Ananea)</option>
-          <option value="OTRO">Otro</option>
-        </select>
-      </div>
-
-      <div id="mWrapCodigo" style="${tipo==='emitida'?'display:none':''}">
-        <label>Código (columna B)</label>
-        <input type="text" id="mCodigo" placeholder="Ej: GDTI - GM - MDCN - T">
-      </div>
-
-      <div id="mWrapInforme" style="${tipo==='emitida'?'':'display:none'}">
-        <label>N° Informe (opcional)</label>
-        <input type="text" id="mInforme">
-      </div>
-
-      <div class="modal-botones">
-        <button class="cancelar" onclick="cerrarModalRevision()">Cancelar</button>
-        <button class="confirmar" id="btnConfirmarModal" onclick="confirmarGuardarModal()">✅ Guardar carta</button>
-      </div>
-      <div class="msg-form" id="msgModal"></div>
     </div>`;
 
   document.body.appendChild(overlay);
