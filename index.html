@@ -7,7 +7,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta name="theme-color" content="#1B2A41">
+<meta name="theme-color" content="#0A3C8B">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Cartas CCA">
@@ -15,13 +15,15 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root{
-    --paper:#F6F3EC;
-    --paper-dim:#EAE5D8;
-    --ink:#1B2A41;
-    --ink-soft:#4B5A70;
-    --stamp-orange:#E8590C;
-    --stamp-teal:#1F6F78;
-    --line:#D8D0BC;
+    --paper:#FFFFFF;
+    --paper-dim:#EAF3FD;
+    --ink:#0A3C8B;
+    --ink-soft:#1360B9;
+    --stamp-orange:#238DF0;
+    --stamp-teal:#238DF0;
+    --stamp-error:#D64545;
+    --celeste:#92C6F9;
+    --line:#D7E6FA;
     --card:#FFFFFF;
   }
   *{box-sizing:border-box;}
@@ -132,7 +134,7 @@
     border:1.5px solid currentColor;
     opacity:.85;
   }
-  .stamp.municipalidad{ color:#B8860B; }
+  .stamp.municipalidad{ color:#1360B9; }
   .stamp.supervision{ color:var(--stamp-teal); }
   .stamp.otros{ color:var(--ink-soft); }
   .stamp.emitida{ color:var(--stamp-orange); }
@@ -163,7 +165,7 @@
   }
   .bloque-fila .label{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft); }
   .estado{ text-align:center; padding:60px 20px; color:var(--ink-soft); font-size:14px; }
-  .estado.error{ color:var(--stamp-orange); }
+  .estado.error{ color:var(--stamp-error); }
 
   .formulario{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
   .formulario label{ display:block; font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:var(--ink-soft); margin:14px 0 5px 0; }
@@ -187,14 +189,14 @@
   .btn-guardar:disabled{ opacity:.5; }
   .msg-form{ margin-top:12px; font-size:13px; text-align:center; }
   .msg-form.ok{ color:var(--stamp-teal); }
-  .msg-form.err{ color:var(--stamp-orange); }
+  .msg-form.err{ color:var(--stamp-error); }
 
   .dropzone{
     border:2.5px dashed var(--ink-soft); border-radius:12px;
     padding:26px 16px; text-align:center; cursor:pointer;
     background:var(--paper); margin-bottom:6px; transition:.15s;
   }
-  .dropzone.arrastrando{ border-color:var(--stamp-orange); background:#FFF3EA; }
+  .dropzone.arrastrando{ border-color:var(--stamp-orange); background:var(--paper-dim); }
   .dropzone .icono{ font-size:26px; display:block; margin-bottom:6px; }
   .dropzone .texto{ font-size:13px; color:var(--ink-soft); }
   .gate{ text-align:center; padding:20px 4px; }
@@ -218,15 +220,15 @@
     font-family:'Inter',sans-serif; border-radius:5px;
   }
   table.grid input:focus{ border-color:var(--stamp-teal); background:var(--paper); outline:none; }
-  table.grid tr.nueva td{ background:#FFF3EA; }
+  table.grid tr.nueva td{ background:#EAF3FD; }
   td.col-guardar{ text-align:center; width:70px; white-space:nowrap; }
   .btn-fila{
     width:32px; height:32px; border-radius:7px; border:none; background:var(--ink); color:#fff;
     cursor:pointer; font-size:14px; margin:0 2px;
   }
   .btn-fila.ok{ background:var(--stamp-teal); }
-  .btn-fila.err{ background:var(--stamp-orange); }
-  .btn-fila.borrar{ background:transparent; color:var(--stamp-orange); border:1.5px solid var(--stamp-orange); }
+  .btn-fila.err{ background:var(--stamp-error); }
+  .btn-fila.borrar{ background:transparent; color:var(--stamp-error); border:1.5px solid var(--stamp-error); }
   .btn-secundario:disabled{ opacity:.4; cursor:default; }
 
   #btnScroll{
@@ -242,7 +244,7 @@
 <header>
   <div class="titlebar">
     <h1>Registro de Cartas</h1>
-    <span class="sub">CONSORCIO CERRO AZUL</span>
+    <img src="logo.png" alt="Consorcio Cerro Azul" style="height:34px;width:auto;">
   </div>
   <div class="tabs">
     <div class="tab active" data-tab="recibidas">Recibidas</div>
@@ -438,7 +440,7 @@ function filaBloque(label, it){
 function renderConsultas(termino, main){
   const dict = construirConsultas();
   const claves = Object.keys(dict).map(Number).sort((a, b) => a - b);
-  const paleta = ["#E8590C","#1F6F78","#B8860B","#4B5A70"];
+  const paleta = ["#0A3C8B","#238DF0","#1360B9","#5A8FC7"];
   let html = "";
   let visibles = 0;
 
@@ -470,7 +472,7 @@ function mensajeVacio(termino, entidadFiltro){
   if(totalCargado === 0){
     return `<div class="estado error">No se cargó ninguna carta desde Google Sheets.<br>
       Esto normalmente es un problema de conexión, no de datos.<br>
-      <button onclick="location.reload()" style="margin-top:10px;padding:8px 16px;border-radius:8px;border:2px solid var(--stamp-orange);background:transparent;color:var(--stamp-orange);font-weight:600;">🔄 Reintentar</button></div>`;
+      <button onclick="location.reload()" style="margin-top:10px;padding:8px 16px;border-radius:8px;border:2px solid var(--stamp-error);background:transparent;color:var(--stamp-error);font-weight:600;">🔄 Reintentar</button></div>`;
   }
 
   let detalle = [];
@@ -753,6 +755,7 @@ async function manejarArchivo(file){
 
   let parsed = null;
   let textoLeido = "";
+  let errorServidor = "";
   try {
     const base64 = await archivoABase64(file);
     const res = await fetch(API_URL, {
@@ -762,9 +765,9 @@ async function manejarArchivo(file){
     });
     const data = await res.json();
     if(data.ok){ parsed = data.datos; textoLeido = data.textoLeido || ""; }
-    else console.warn("No se pudo leer el PDF:", data.error);
+    else errorServidor = data.error || "Error desconocido del servidor.";
   } catch (e) {
-    console.warn("Error de lectura OCR:", e);
+    errorServidor = "Error de conexión: " + e.message;
   }
 
   if(parsed && parsed.tipo) tipoFormulario = parsed.tipo;
@@ -783,7 +786,11 @@ async function manejarArchivo(file){
   renderFormulario(document.getElementById("main"));
 
   if(!parsed || !parsed.numero){
-    alert("El OCR no pudo identificar bien el número/asunto. Esto es lo que alcanzó a leer del documento (primeros caracteres):\n\n" + (textoLeido || "(no se leyó nada — revisa si el PDF es una imagen escaneada legible)") + "\n\nRevisa y completa la fila nueva (al final de la tabla) a mano. Si me pasas este texto, puedo ajustar el reconocimiento.");
+    if(errorServidor){
+      alert("El servidor no pudo procesar el PDF. Este es el error exacto — mándamelo tal cual para que lo arregle:\n\n" + errorServidor);
+    } else {
+      alert("El OCR no pudo identificar bien el número/asunto. Esto es lo que alcanzó a leer del documento (primeros caracteres):\n\n" + (textoLeido || "(no se leyó nada — revisa si el PDF es una imagen escaneada legible)") + "\n\nRevisa y completa la fila nueva (al final de la tabla) a mano. Si me pasas este texto, puedo ajustar el reconocimiento.");
+    }
   }
 }
 
@@ -807,7 +814,7 @@ async function autoguardarFila(key){
   if(!pinSesion){ alert("Sesión sin PIN — vuelve a entrar al panel."); panelDesbloqueado = false; renderFormulario(document.getElementById("main")); return; }
 
   tr.style.transition = "background-color .3s";
-  tr.style.backgroundColor = "#FFF3EA"; // guardando...
+  tr.style.backgroundColor = "#EAF3FD"; // guardando...
 
   try {
     const body = { accion: "guardarCarta", pin: pinSesion, tipo: tipoFormulario, numero: valores.numero, fecha: valores.fecha, asunto: valores.asunto, entidad: valores.entidad };
@@ -829,7 +836,7 @@ async function autoguardarFila(key){
 
     if(data.link) tr.querySelector(".c-link").value = data.link;
     delete archivosPendientes[key];
-    tr.style.backgroundColor = "#DFF5F2";
+    tr.style.backgroundColor = "#D6EAFB";
     setTimeout(() => { tr.style.backgroundColor = ""; }, 900);
 
     if(key.startsWith("nueva_")){
@@ -840,7 +847,7 @@ async function autoguardarFila(key){
       renderFormulario(document.getElementById("main")); // recién aquí sí, la fila cambió de sección
     }
   } catch (err) {
-    tr.style.backgroundColor = "#FFE1D6";
+    tr.style.backgroundColor = "#FBDCDC";
     alert("No se pudo guardar esa fila: " + err.message);
   }
 }
