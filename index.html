@@ -635,7 +635,7 @@ function abrirLinkFila(key){
 async function eliminarFilaExistente(key){
   const tr = document.querySelector(`tr[data-key="${key}"]`);
   const numero = tr.querySelector(".c-numero").value.trim();
-  if(!confirm(`¿Quitar la carta N° ${numero} de ${tipoFormulario === 'emitida' ? 'Emitidos' : 'Recibidos'}?\n\nEsto borra la fila del Google Sheet. El PDF en Drive NO se elimina.`)) return;
+  if(!confirm(`¿Quitar la carta N° ${numero} de ${tipoFormulario === 'emitida' ? 'Emitidos' : 'Recibidos'}?\n\nEsto borra la fila del Google Sheet Y manda el PDF a la papelera de Drive (recuperable ahí por un tiempo, no se borra para siempre al toque).`)) return;
   if(!pinSesion){ alert("Sesión sin PIN — vuelve a entrar al panel."); return; }
 
   tr.style.opacity = "0.35";
@@ -827,11 +827,21 @@ function abrirModalRevision(file, parsed, textoLeido, errorServidor){
 
       <div id="mWrapEntidad">
         <label id="mLabelEntidad">${tipo === 'emitida' ? 'Dirigida a (entidad)' : 'Entidad remitente'}</label>
-        <select id="mEntidad">
+        <select id="mEntidad" onchange="autocompletarCodigoModal()">
           <option value="MUNICIPALIDAD DE CIUDAD NUEVA" ${(parsed&&parsed.entidad)==='MUNICIPALIDAD DE CIUDAD NUEVA'?'selected':''}>Municipalidad</option>
           <option value="CONSORCIO ANANEA (SUPERVISION)" ${(parsed&&parsed.entidad)==='CONSORCIO ANANEA (SUPERVISION)'?'selected':''}>Supervisión (Ananea)</option>
           <option value="OTRO">Otro</option>
         </select>
+      </div>
+
+      <div id="mWrapCodigo" style="${tipo==='emitida'?'display:none':''}">
+        <label>Código (columna B)</label>
+        <input type="text" id="mCodigo" placeholder="Ej: GDTI - GM - MDCN - T">
+      </div>
+
+      <div id="mWrapInforme" style="${tipo==='emitida'?'':'display:none'}">
+        <label>N° Informe (opcional)</label>
+        <input type="text" id="mInforme">
       </div>
 
       <div class="modal-botones">
@@ -844,6 +854,16 @@ function abrirModalRevision(file, parsed, textoLeido, errorServidor){
   document.body.appendChild(overlay);
   window._archivoModalActual = file;
   window._tipoModalActual = tipo;
+  autocompletarCodigoModal();
+}
+
+function autocompletarCodigoModal(){
+  const entidad = document.getElementById("mEntidad").value;
+  const campoCodigo = document.getElementById("mCodigo");
+  if(!campoCodigo) return;
+  if(entidad === "MUNICIPALIDAD DE CIUDAD NUEVA") campoCodigo.value = "GDTI - GM - MDCN - T";
+  else if(entidad === "CONSORCIO ANANEA (SUPERVISION)") campoCodigo.value = "CS-ANANEA";
+  else campoCodigo.value = "";
 }
 
 function cambiarTipoModal(tipo){
@@ -851,6 +871,8 @@ function cambiarTipoModal(tipo){
   document.getElementById("mTipoRecibida").classList.toggle("on", tipo === "recibida");
   document.getElementById("mTipoEmitida").classList.toggle("on", tipo === "emitida");
   document.getElementById("mLabelEntidad").textContent = tipo === "emitida" ? "Dirigida a (entidad)" : "Entidad remitente";
+  document.getElementById("mWrapCodigo").style.display = tipo === "emitida" ? "none" : "block";
+  document.getElementById("mWrapInforme").style.display = tipo === "emitida" ? "block" : "none";
 }
 
 function cerrarModalRevision(){
@@ -879,6 +901,11 @@ async function confirmarGuardarModal(){
     if(fechaISO){ const [a,m,d] = fechaISO.split("-"); fecha = `${d}/${m}/${a}`; }
 
     const body = { accion: "guardarCarta", pin: pinSesion, tipo, numero, fecha, asunto, entidad };
+    if(tipo === "emitida"){
+      body.informe = document.getElementById("mInforme").value.trim();
+    } else {
+      body.codigoDe = document.getElementById("mCodigo").value.trim();
+    }
     if(window._archivoModalActual){
       body.archivoBase64 = await archivoABase64(window._archivoModalActual);
       body.mimeType = window._archivoModalActual.type || "application/pdf";
