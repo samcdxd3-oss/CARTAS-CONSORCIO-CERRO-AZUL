@@ -244,7 +244,7 @@
   }
   .modal-panel{
     background:var(--card); border-radius:14px; padding:20px;
-    max-width:460px; width:100%; max-height:88vh; overflow-y:auto;
+    max-width:520px; width:100%; max-height:88vh; overflow-y:auto;
     box-shadow:0 12px 40px rgba(0,0,0,.3);
   }
   .modal-panel h3{ font-family:'Space Grotesk',sans-serif; font-size:16px; margin:0 0 4px 0; color:var(--ink); }
@@ -291,6 +291,7 @@
 
 <button id="btnScroll" onclick="toggleScroll()">↓</button>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 // =====================================================================
 // PEGA AQUÍ LA URL DE TU APPS SCRIPT WEB APP (después de "Implementar")
@@ -303,6 +304,8 @@ let entidadFiltro = null;
 let tipoFormulario = "recibida";
 let panelDesbloqueado = false;
 let pinSesion = "";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 let archivoSeleccionado = null;
 
 async function cargarDatos() {
@@ -518,7 +521,7 @@ function escapeHtml(str){
 // ---- Panel de control: cuadrícula tipo Excel + subidor de PDF ----
 let filasNuevas = [];        // filas en blanco/prellenadas aún no guardadas
 let archivosPendientes = {}; // key de fila -> File pendiente de subir
-let historialDeshacer = [];  // pila de snapshots de filasNuevas, para Ctrl+Z
+// (se quitó el sistema de deshacer/Ctrl+Z por seguridad — cada acción ya pide confirmación o PIN)
 let ordenDescendente = false; // false = como está en el Sheet, true = últimos agregados primero
 
 const COLUMNAS = {
@@ -569,7 +572,6 @@ function renderFormulario(main){
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn-secundario" id="btnZip" onclick="descargarTodosZip()">⬇ Descargar todos (ZIP)</button>
         <button class="btn-secundario" onclick="toggleOrden()">↕ ${ordenDescendente ? "Últimos agregados primero" : "Como está en el Sheet"}</button>
-        <button class="btn-secundario" onclick="deshacer()" ${historialDeshacer.length===0?"disabled":""}>↩ Deshacer (Ctrl+Z)</button>
         ${tipoFormulario === 'emitida' ? `<button class="btn-secundario" onclick="agregarFilaVacia()">+ Nueva fila</button>` : ''}
       </div>
     </div>
@@ -659,19 +661,7 @@ async function eliminarFilaExistente(key){
 
 function escapeAtributo(str){ return escapeHtml(str).replace(/"/g, "&quot;"); }
 
-function guardarHistorial(){
-  historialDeshacer.push(JSON.parse(JSON.stringify(filasNuevas)));
-  if(historialDeshacer.length > 25) historialDeshacer.shift();
-}
-
-function deshacer(){
-  if(historialDeshacer.length === 0) return;
-  filasNuevas = historialDeshacer.pop();
-  renderFormulario(document.getElementById("main"));
-}
-
 function eliminarFilaNueva(key){
-  guardarHistorial();
   const idx = parseInt(key.split("_")[1], 10);
   filasNuevas.splice(idx, 1);
   delete archivosPendientes[key];
@@ -682,13 +672,6 @@ function toggleOrden(){
   ordenDescendente = !ordenDescendente;
   renderFormulario(document.getElementById("main"));
 }
-
-document.addEventListener("keydown", (e) => {
-  if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && currentTab === "editar"){
-    e.preventDefault();
-    deshacer();
-  }
-});
 
 function intentarDesbloquear(){
   const val = document.getElementById("pinEntrada").value.trim();
@@ -730,7 +713,6 @@ function cambiarTipo(tipo){
 }
 
 function agregarFilaVacia(){
-  guardarHistorial();
   const cols = COLUMNAS[tipoFormulario];
   const vacia = {};
   cols.forEach(c => vacia[c.key] = "");
@@ -769,34 +751,56 @@ function parsearNombreArchivo(nombreOriginal){
   return { tipo, numero, entidad, asunto };
 }
 
+async function renderizarPrimeraPagina(file){
+  try {
+    const url = URL.createObjectURL(file);
+    const pdf = await pdfjsLib.getDocument(url).promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 1.3 });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+    URL.revokeObjectURL(url);
+    return canvas.toDataURL("image/png");
+  } catch (e) {
+    console.warn("No se pudo previsualizar el PDF:", e);
+    return null;
+  }
+}
+
 async function manejarArchivo(file){
   document.getElementById("dropzoneTexto").textContent = "🔍 Leyendo el documento con OCR (unos segundos)...";
   document.getElementById("dropzone").classList.add("arrastrando");
 
-  let parsed = null;
-  let textoLeido = "";
-  let errorServidor = "";
-  try {
-    const base64 = await archivoABase64(file);
-    const res = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ accion: "leerPDF", pin: pinSesion, archivoBase64: base64, mimeType: file.type || "application/pdf" })
-    });
-    const data = await res.json();
-    if(data.ok){ parsed = data.datos; textoLeido = data.textoLeido || ""; }
-    else errorServidor = data.error || "Error desconocido del servidor.";
-  } catch (e) {
-    errorServidor = "Error de conexión: " + e.message;
-  }
+  const [resultadoOCR, imagenPreview] = await Promise.all([
+    (async () => {
+      let parsed = null, textoLeido = "", errorServidor = "";
+      try {
+        const base64 = await archivoABase64(file);
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ accion: "leerPDF", pin: pinSesion, archivoBase64: base64, mimeType: file.type || "application/pdf" })
+        });
+        const data = await res.json();
+        if(data.ok){ parsed = data.datos; textoLeido = data.textoLeido || ""; }
+        else errorServidor = data.error || "Error desconocido del servidor.";
+      } catch (e) {
+        errorServidor = "Error de conexión: " + e.message;
+      }
+      return { parsed, textoLeido, errorServidor };
+    })(),
+    renderizarPrimeraPagina(file)
+  ]);
 
   document.getElementById("dropzoneTexto").textContent = "Arrastra el PDF aquí, o toca para elegirlo";
   document.getElementById("dropzone").classList.remove("arrastrando");
 
-  abrirModalRevision(file, parsed, textoLeido, errorServidor);
+  abrirModalRevision(file, resultadoOCR.parsed, resultadoOCR.textoLeido, resultadoOCR.errorServidor, imagenPreview);
 }
 
-function abrirModalRevision(file, parsed, textoLeido, errorServidor){
+function abrirModalRevision(file, parsed, textoLeido, errorServidor, imagenPreview){
   const tipo = (parsed && parsed.tipo) || tipoFormulario;
   const overlay = document.createElement("div");
   overlay.className = "overlay-modal";
@@ -806,6 +810,8 @@ function abrirModalRevision(file, parsed, textoLeido, errorServidor){
     <div class="modal-panel">
       <h3>📄 Revisa antes de guardar</h3>
       <div class="archivo-nombre">${escapeHtml(file.name)}</div>
+
+      ${imagenPreview ? `<img src="${imagenPreview}" style="width:100%;border-radius:8px;border:1px solid var(--line);margin-bottom:12px;">` : `<div class="modal-aviso">No se pudo generar una vista previa de la imagen — puedes seguir corrigiendo los datos igual.</div>`}
 
       ${errorServidor ? `<div class="modal-aviso">⚠️ El servidor no pudo leer el documento (${escapeHtml(errorServidor)}). Completa los datos a mano.</div>` : ""}
       ${!errorServidor && (!parsed || !parsed.numero) ? `<div class="modal-aviso">🔍 El OCR no identificó bien el número — revisa y completa a mano.<br><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;">${escapeHtml(textoLeido).substring(0,200) || "(no se leyó texto)"}</span></div>` : ""}
@@ -897,7 +903,7 @@ async function confirmarGuardarModal(){
   btn.disabled = true; btn.textContent = "Guardando...";
 
   try {
-    let fecha = "";
+    let fecha = "DD/MM/" + new Date().getFullYear();
     if(fechaISO){ const [a,m,d] = fechaISO.split("-"); fecha = `${d}/${m}/${a}`; }
 
     const body = { accion: "guardarCarta", pin: pinSesion, tipo, numero, fecha, asunto, entidad };
@@ -953,7 +959,7 @@ async function autoguardarFila(key){
   tr.style.backgroundColor = "#EAF3FD"; // guardando...
 
   try {
-    const body = { accion: "guardarCarta", pin: pinSesion, tipo: tipoFormulario, numero: valores.numero, fecha: valores.fecha, asunto: valores.asunto, entidad: valores.entidad };
+    const body = { accion: "guardarCarta", pin: pinSesion, tipo: tipoFormulario, numero: valores.numero, fecha: valores.fecha || ("DD/MM/" + new Date().getFullYear()), asunto: valores.asunto, entidad: valores.entidad };
     if(tipoFormulario === "emitida"){ body.fechaRealizado = valores.fechaRealizado; body.informe = valores.informe; }
     else { body.codigoDe = valores.codigoDe; body.para = valores.para; }
 
