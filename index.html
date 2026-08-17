@@ -25,6 +25,10 @@
     --celeste:#92C6F9;
     --line:#D7E6FA;
     --card:#FFFFFF;
+    --cat-municipalidad:#0A3C8B;
+    --cat-supervision:#0E8F82;
+    --cat-otros:#B8860B;
+    --cat-emitida:#7C3AED;
   }
   *{box-sizing:border-box;}
   body{
@@ -134,10 +138,10 @@
     border:1.5px solid currentColor;
     opacity:.85;
   }
-  .stamp.municipalidad{ color:#1360B9; }
-  .stamp.supervision{ color:var(--stamp-teal); }
-  .stamp.otros{ color:var(--ink-soft); }
-  .stamp.emitida{ color:var(--stamp-orange); }
+  .stamp.municipalidad{ color:var(--cat-municipalidad); border-color:var(--cat-municipalidad); }
+  .stamp.supervision{ color:var(--cat-supervision); border-color:var(--cat-supervision); }
+  .stamp.otros{ color:var(--cat-otros); border-color:var(--cat-otros); }
+  .stamp.emitida{ color:var(--cat-emitida); border-color:var(--cat-emitida); }
   a.link{
     display:inline-flex; align-items:center; gap:6px;
     font-family:'IBM Plex Mono',monospace;
@@ -437,21 +441,23 @@ function construirConsultas(){
   DATA.emitidas.forEach(item => {
     const m = String(item.asunto || "").match(REGEX_CONSULTA);
     if(!m) return;
+    const conOrigen = { ...item, _origen: "emitida" };
     const nums = m[1].match(/\d+/g) || [];
     nums.forEach(nStr => {
       const n = parseInt(nStr, 10);
-      if(!dict[n]) dict[n] = { emitida: item, seguimientos: [] };
-      else dict[n].seguimientos.push(item);
+      if(!dict[n]) dict[n] = { emitida: conOrigen, seguimientos: [] };
+      else dict[n].seguimientos.push(conOrigen);
     });
   });
 
   DATA.recibidas.forEach(item => {
     const m = String(item.asunto || "").match(REGEX_CONSULTA);
     if(!m) return;
+    const conOrigen = { ...item, _origen: "recibida" };
     const nums = m[1].match(/\d+/g) || [];
     nums.forEach(nStr => {
       const n = parseInt(nStr, 10);
-      if(dict[n]) dict[n].seguimientos.push(item);
+      if(dict[n]) dict[n].seguimientos.push(conOrigen);
     });
   });
 
@@ -462,10 +468,20 @@ function construirConsultas(){
   return dict;
 }
 
+function badgeEntidad(it){
+  if(it._origen === "emitida"){
+    return `<span class="stamp emitida" style="position:static;transform:none;display:inline-block;margin-left:8px;">EMITIDA</span>`;
+  }
+  const ent = (it.entidad || "").toUpperCase();
+  if(ent.includes("MUNICIPALIDA")) return `<span class="stamp municipalidad" style="position:static;transform:none;display:inline-block;margin-left:8px;">MUNICIPALIDAD</span>`;
+  if(ent.includes("ANANEA")) return `<span class="stamp supervision" style="position:static;transform:none;display:inline-block;margin-left:8px;">SUPERVISIÓN</span>`;
+  return `<span class="stamp otros" style="position:static;transform:none;display:inline-block;margin-left:8px;">OTRO</span>`;
+}
+
 function filaBloque(label, it){
   return `<div class="bloque-fila">
     <span class="label">${label}</span>
-    <span>N° ${it.numero} — ${it.fecha} — ${escapeHtml(it.asunto)}
+    <span>N° ${it.numero} — ${it.fecha} — ${escapeHtml(it.asunto)}${badgeEntidad(it)}
       ${it.link ? ` · <a class="link" href="${it.link}" target="_blank" rel="noopener">PDF →</a>` : ""}
     </span>
   </div>`;
@@ -473,8 +489,9 @@ function filaBloque(label, it){
 
 function renderConsultas(termino, main){
   const dict = construirConsultas();
+  window._dictConsultas = dict;
   const claves = Object.keys(dict).map(Number).sort((a, b) => a - b);
-  const paleta = ["#0A3C8B","#238DF0","#1360B9","#5A8FC7"];
+  const paleta = ["#0A3C8B","#238DF0","#0E8F82","#1360B9","#7C3AED","#238DF0"];
   let html = "";
   let visibles = 0;
 
@@ -488,8 +505,18 @@ function renderConsultas(termino, main){
 
     html += `<div class="bloque">
       <div class="bloque-header" style="background:${color}">
-        CONSULTA N° ${String(num).padStart(2, "0")}
-        <div class="bloque-subtitulo">${escapeHtml(c.emitida.asunto)}</div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <div>
+            CONSULTA N° ${String(num).padStart(2, "0")}
+            <div class="bloque-subtitulo">${escapeHtml(c.emitida.asunto)}</div>
+          </div>
+          <div style="position:relative;">
+            <button onclick="toggleMenuConsulta(${num})" style="background:rgba(255,255,255,.25);border:none;color:#fff;width:28px;height:28px;border-radius:6px;cursor:pointer;font-weight:700;">⋮</button>
+            <div id="menuConsulta${num}" style="display:none;position:absolute;right:0;top:32px;background:#fff;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.25);min-width:160px;z-index:15;overflow:hidden;">
+              <button onclick="verReferencias(${num})" style="width:100%;text-align:left;padding:10px 12px;border:none;background:transparent;color:var(--ink);font-size:13px;cursor:pointer;">📎 Ver referencias</button>
+            </div>
+          </div>
+        </div>
       </div>`;
     html += filaBloque("EMITIDA", c.emitida);
     c.seguimientos.forEach((it, i) => { html += filaBloque("SEGUIM. " + (i + 1), it); });
@@ -498,6 +525,111 @@ function renderConsultas(termino, main){
 
   main.innerHTML = `<div class="count">${visibles} consulta${visibles===1?"":"s"} encontrada${visibles===1?"":"s"}</div>` +
     (visibles === 0 ? mensajeVacio(termino, null) : html);
+}
+
+function toggleMenuConsulta(num){
+  document.querySelectorAll("[id^='menuConsulta']").forEach(m => {
+    if(m.id !== "menuConsulta" + num) m.style.display = "none";
+  });
+  const menu = document.getElementById("menuConsulta" + num);
+  menu.style.display = menu.style.display === "block" ? "none" : "block";
+}
+document.addEventListener("click", (e) => {
+  if(!e.target.closest("[id^='menuConsulta']") && e.target.tagName !== "BUTTON"){
+    document.querySelectorAll("[id^='menuConsulta']").forEach(m => m.style.display = "none");
+  }
+});
+
+function buscarCartaPorReferencia(clave){
+  const [numero, anio] = clave.split("-");
+  const todas = [
+    ...DATA.emitidas.map(i => ({ ...i, _tipo: "emitida" })),
+    ...DATA.recibidas.map(i => ({ ...i, _tipo: "recibida" }))
+  ];
+  return todas.find(it => it.numero === numero && String(it.fecha || "").includes(anio));
+}
+
+async function verReferencias(num){
+  document.querySelectorAll("[id^='menuConsulta']").forEach(m => m.style.display = "none");
+  const c = window._dictConsultas[num];
+
+  const overlay = document.createElement("div");
+  overlay.className = "overlay-modal";
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-panel" style="max-width:520px;">
+      <h3>📎 Referencias de CONSULTA N° ${String(num).padStart(2,"0")}</h3>
+      <div class="archivo-nombre">N° ${c.emitida.numero} — ${escapeHtml(c.emitida.asunto)}</div>
+      <div id="cuerpoReferencias" style="margin-top:10px;">
+        <div class="modal-aviso">🔍 Buscando cartas referentes a esta carta...</div>
+      </div>
+      <div class="modal-botones">
+        <button class="confirmar" onclick="this.closest('.overlay-modal').remove()">Cerrar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  let refsTexto = (c.emitida.referencias || "").trim();
+
+  if(!refsTexto){
+    // Carta vieja sin referencias guardadas todavía: la analizamos ahora, una sola vez.
+    if(!c.emitida.link){
+      document.getElementById("cuerpoReferencias").innerHTML = `<div class="modal-aviso">Esta carta no tiene PDF vinculado — no se puede analizar.</div>`;
+      return;
+    }
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ accion: "leerReferenciasDesdeLink", pin: pinSesion, link: c.emitida.link })
+      });
+      const data = await res.json();
+      if(!data.ok) throw new Error(data.error || "No se pudo analizar el documento.");
+      refsTexto = (data.datos && data.datos.referencias) || "";
+
+      // La guardamos para que la próxima vez ya no haya que volver a analizar
+      await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ accion: "guardarReferencias", pin: pinSesion, tipo: c.emitida._origen, numero: c.emitida.numero, referencias: refsTexto })
+      });
+      c.emitida.referencias = refsTexto; // cache local por si se reabre en esta misma sesión
+    } catch (err) {
+      document.getElementById("cuerpoReferencias").innerHTML = `<div class="modal-aviso">⚠️ No se pudo analizar el documento: ${escapeHtml(err.message)}</div>`;
+      return;
+    }
+  }
+
+  mostrarListaReferencias(refsTexto);
+}
+
+function mostrarListaReferencias(refsTexto){
+  const claves = refsTexto ? refsTexto.split(",").filter(Boolean) : [];
+  let filasHtml = "";
+
+  if(claves.length === 0){
+    filasHtml = `<div class="modal-aviso">No se detectaron referencias citadas en esta carta.</div>`;
+  } else {
+    claves.forEach(clave => {
+      const encontrada = buscarCartaPorReferencia(clave);
+      if(encontrada){
+        filasHtml += `<div class="bloque-fila">
+          <span class="label">N° ${clave.split("-")[0]}</span>
+          <span>${escapeHtml(encontrada.asunto)} ${badgeEntidad({ _origen: encontrada._tipo, entidad: encontrada.entidad })}
+            ${encontrada.link ? ` · <a class="link" href="${encontrada.link}" target="_blank" rel="noopener">PDF →</a>` : ""}
+          </span>
+        </div>`;
+      } else {
+        filasHtml += `<div class="bloque-fila">
+          <span class="label">N° ${clave.split("-")[0]}</span>
+          <span style="color:var(--ink-soft);">No está en el sistema (puede ser de otra entidad, o aún no se subió)</span>
+        </div>`;
+      }
+    });
+  }
+
+  const contenedor = document.getElementById("cuerpoReferencias");
+  if(contenedor) contenedor.innerHTML = `<div class="bloque">${filasHtml}</div>`;
 }
 
 function mensajeVacio(termino, entidadFiltro){
@@ -895,6 +1027,7 @@ function abrirModalRevision(file, parsed, textoLeido, errorServidor, imagenPrevi
   document.body.appendChild(overlay);
   window._archivoModalActual = file;
   window._tipoModalActual = tipo;
+  window._referenciasModalActual = (parsed && parsed.referencias) || "";
   autocompletarCodigoModal();
 }
 
@@ -941,7 +1074,7 @@ async function confirmarGuardarModal(){
     let fecha = "DD/MM/" + new Date().getFullYear();
     if(fechaISO){ const [a,m,d] = fechaISO.split("-"); fecha = `${d}/${m}/${a}`; }
 
-    const body = { accion: "guardarCarta", pin: pinSesion, tipo, numero, fecha, asunto, entidad };
+    const body = { accion: "guardarCarta", pin: pinSesion, tipo, numero, fecha, asunto, entidad, referencias: window._referenciasModalActual || "" };
     if(tipo === "emitida"){
       body.informe = document.getElementById("mInforme").value.trim();
     } else {
