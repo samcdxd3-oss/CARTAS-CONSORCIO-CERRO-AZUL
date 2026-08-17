@@ -539,7 +539,7 @@ function renderFormulario(main){
       </div>
     </div>
 
-    <label>📥 Subir PDF (agrega una fila nueva al final, ya prellenada)</label>
+    <label>📥 Subir PDF (lo lee con OCR y agrega una fila nueva al final, ya prellenada)</label>
     <div class="dropzone" id="dropzone">
       <span class="icono">📄</span>
       <span class="texto" id="dropzoneTexto">Arrastra el PDF aquí, o toca para elegirlo</span>
@@ -559,10 +559,7 @@ function renderFormulario(main){
       </table>
     </div>
 
-    <div style="margin-top:14px;">
-      <label>PIN de acceso (necesario para guardar cualquier fila)</label>
-      <input type="password" id="pinGuardado" inputmode="numeric" value="${escapeHtml(pinSesion)}" style="max-width:200px;">
-    </div>`;
+    <p style="font-size:11.5px;color:var(--ink-soft);margin-top:12px;">💾 Cada celda se guarda sola al tocar fuera de ella (como en un Excel real) — no hace falta ningún botón de guardar.</p>`;
 
   const dz = document.getElementById("dropzone");
   const inputOculto = document.getElementById("fArchivoOculto");
@@ -574,13 +571,25 @@ function renderFormulario(main){
 }
 
 function filaHTML(f, cols, key, esNueva){
-  const celdas = cols.map(c => `<td><input class="c-${c.key}" value="${escapeAtributo(f[c.key] || "")}"></td>`).join("");
-  const tieneArchivo = archivosPendientes[key] ? " 📎" : "";
+  const celdas = cols.map(c => {
+    if(c.key === "link"){
+      return `<td><input class="c-link" value="${escapeAtributo(f.link || "")}" onblur="autoguardarFila('${key}')"></td>`;
+    }
+    return `<td><input class="c-${c.key}" value="${escapeAtributo(f[c.key] || "")}" onblur="autoguardarFila('${key}')"></td>`;
+  }).join("");
+  const botonAbrir = `<button type="button" class="btn-fila" style="background:transparent;color:var(--stamp-teal);border:1.5px solid var(--stamp-teal);" onclick="abrirLinkFila('${key}')" title="Abrir PDF">🔗</button>`;
   const botonBorrar = esNueva ? `<button class="btn-fila borrar" onclick="eliminarFilaNueva('${key}')" title="Quitar fila">✕</button>` : "";
   return `<tr data-key="${key}" class="${esNueva ? 'nueva' : ''}">
     ${celdas}
-    <td class="col-guardar"><button class="btn-fila" onclick="guardarFila('${key}')" title="Guardar fila">💾${tieneArchivo}</button>${botonBorrar}</td>
+    <td class="col-guardar">${botonAbrir}${botonBorrar}</td>
   </tr>`;
+}
+
+function abrirLinkFila(key){
+  const tr = document.querySelector(`tr[data-key="${key}"]`);
+  const val = tr.querySelector(".c-link").value.trim();
+  if(val) window.open(val, "_blank", "noopener");
+  else alert("Esta fila todavía no tiene un PDF/link guardado.");
 }
 
 function escapeAtributo(str){ return escapeHtml(str).replace(/"/g, "&quot;"); }
@@ -670,18 +679,35 @@ function parsearNombreArchivo(nombreOriginal){
   return { tipo, numero, entidad, asunto };
 }
 
-function manejarArchivo(file){
-  const parsed = parsearNombreArchivo(file.name);
-  if(parsed) tipoFormulario = parsed.tipo;
-
+async function manejarArchivo(file){
   guardarHistorial();
+
+  document.getElementById("dropzoneTexto").textContent = "🔍 Leyendo el documento con OCR (unos segundos)...";
+  document.getElementById("dropzone").classList.add("arrastrando");
+
+  let parsed = null;
+  try {
+    const base64 = await archivoABase64(file);
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ accion: "leerPDF", pin: pinSesion, archivoBase64: base64, mimeType: file.type || "application/pdf" })
+    });
+    const data = await res.json();
+    if(data.ok) parsed = data.datos;
+    else console.warn("No se pudo leer el PDF:", data.error);
+  } catch (e) {
+    console.warn("Error de lectura OCR:", e);
+  }
+
+  if(parsed && parsed.tipo) tipoFormulario = parsed.tipo;
   const cols = COLUMNAS[tipoFormulario];
   const nuevaFila = {};
   cols.forEach(c => nuevaFila[c.key] = "");
   if(parsed){
-    nuevaFila.numero = parsed.numero;
-    nuevaFila.asunto = parsed.asunto;
-    nuevaFila.entidad = parsed.entidad !== "OTRO" ? parsed.entidad : "";
+    if(parsed.numero) nuevaFila.numero = parsed.numero;
+    if(parsed.asunto) nuevaFila.asunto = parsed.asunto;
+    if(parsed.entidad) nuevaFila.entidad = parsed.entidad;
   }
   filasNuevas.push(nuevaFila);
   const key = "nueva_" + (filasNuevas.length - 1);
@@ -689,8 +715,8 @@ function manejarArchivo(file){
 
   renderFormulario(document.getElementById("main"));
 
-  if(!parsed){
-    alert("No pude leer el número de carta del nombre del archivo — revisa y completa la fila nueva (al final de la tabla) a mano.");
+  if(!parsed || !parsed.numero){
+    alert("El OCR no pudo leer bien el número/asunto de este documento — revisa y completa la fila nueva (al final de la tabla) a mano.");
   }
 }
 
@@ -703,23 +729,21 @@ function archivoABase64(file){
   });
 }
 
-async function guardarFila(key){
+async function autoguardarFila(key){
   const tr = document.querySelector(`tr[data-key="${key}"]`);
-  const btn = tr.querySelector(".btn-fila");
+  if(!tr) return;
   const cols = COLUMNAS[tipoFormulario];
-  const pin = document.getElementById("pinGuardado").value.trim();
-
-  if(!pin){ alert("Escribe el PIN de acceso antes de guardar."); return; }
-
   const valores = {};
   cols.forEach(c => { valores[c.key] = tr.querySelector(".c-" + c.key).value.trim(); });
 
-  if(!valores.numero){ alert("Falta el N° de carta en esa fila."); return; }
+  if(!valores.numero) return; // todavía no hay nada que guardar en esa fila
+  if(!pinSesion){ alert("Sesión sin PIN — vuelve a entrar al panel."); panelDesbloqueado = false; renderFormulario(document.getElementById("main")); return; }
 
-  btn.textContent = "⏳"; btn.disabled = true; btn.className = "btn-fila";
+  tr.style.transition = "background-color .3s";
+  tr.style.backgroundColor = "#FFF3EA"; // guardando...
 
   try {
-    const body = { accion: "guardarCarta", pin, tipo: tipoFormulario, numero: valores.numero, fecha: valores.fecha, asunto: valores.asunto, entidad: valores.entidad };
+    const body = { accion: "guardarCarta", pin: pinSesion, tipo: tipoFormulario, numero: valores.numero, fecha: valores.fecha, asunto: valores.asunto, entidad: valores.entidad };
     if(tipoFormulario === "emitida"){ body.fechaRealizado = valores.fechaRealizado; body.informe = valores.informe; }
     else { body.codigoDe = valores.codigoDe; body.para = valores.para; }
 
@@ -736,17 +760,21 @@ async function guardarFila(key){
     const data = await res.json();
     if(!data.ok) throw new Error(data.error || "Error desconocido");
 
-    pinSesion = pin;
+    if(data.link) tr.querySelector(".c-link").value = data.link;
     delete archivosPendientes[key];
+    tr.style.backgroundColor = "#DFF5F2";
+    setTimeout(() => { tr.style.backgroundColor = ""; }, 900);
+
     if(key.startsWith("nueva_")){
       const idx = parseInt(key.split("_")[1], 10);
+      const guardada = { ...valores, link: data.link || valores.link };
       filasNuevas.splice(idx, 1);
+      if(tipoFormulario === "emitida") DATA.emitidas.push(guardada); else DATA.recibidas.push(guardada);
+      renderFormulario(document.getElementById("main")); // recién aquí sí, la fila cambió de sección
     }
-    await cargarDatos();
-    renderFormulario(document.getElementById("main"));
   } catch (err) {
-    btn.textContent = "✕"; btn.className = "btn-fila err"; btn.disabled = false;
-    alert("Error al guardar: " + err.message);
+    tr.style.backgroundColor = "#FFE1D6";
+    alert("No se pudo guardar esa fila: " + err.message);
   }
 }
 
@@ -760,6 +788,13 @@ function archivoABase64(file){
 }
 
 cargarDatos();
+
+// Evita que el navegador abra/navegue al archivo si se suelta cerca pero fuera de la zona de arrastre
+["dragover", "drop"].forEach(ev => {
+  window.addEventListener(ev, (e) => {
+    if(!e.target.closest || !e.target.closest("#dropzone")) e.preventDefault();
+  });
+});
 
 if("serviceWorker" in navigator){
   window.addEventListener("load", () => {
