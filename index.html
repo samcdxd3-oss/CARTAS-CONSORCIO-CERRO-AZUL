@@ -411,7 +411,10 @@ function renderLista(lista, termino, main, tipo){
           </div>
           <div class="asunto">${escapeHtml(item.asunto)}</div>
           ${tipo === "emitida" && item.entidad ? `<div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px;">Para: ${escapeHtml(item.entidad)}</div>` : ""}
-          ${item.link ? `<a class="link" href="${item.link}" target="_blank" rel="noopener">📄 Ver PDF →</a>` : ""}
+          <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
+            ${item.link ? `<a class="link" href="${item.link}" target="_blank" rel="noopener">📄 Ver PDF →</a>` : ""}
+            <button type="button" onclick="abrirReferenciasPorNumero('${escapeAtributo(item.numero)}','${tipo}')" style="background:transparent;border:none;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;cursor:pointer;padding:0;">🔗 Relacionados</button>
+          </div>
         </div>`;
     });
   }
@@ -441,7 +444,7 @@ function construirConsultas(){
   DATA.emitidas.forEach(item => {
     const m = String(item.asunto || "").match(REGEX_CONSULTA);
     if(!m) return;
-    const conOrigen = { ...item, _origen: "emitida" };
+    const conOrigen = { ...item, _tipo: "emitida" };
     const nums = m[1].match(/\d+/g) || [];
     nums.forEach(nStr => {
       const n = parseInt(nStr, 10);
@@ -453,7 +456,7 @@ function construirConsultas(){
   DATA.recibidas.forEach(item => {
     const m = String(item.asunto || "").match(REGEX_CONSULTA);
     if(!m) return;
-    const conOrigen = { ...item, _origen: "recibida" };
+    const conOrigen = { ...item, _tipo: "recibida" };
     const nums = m[1].match(/\d+/g) || [];
     nums.forEach(nStr => {
       const n = parseInt(nStr, 10);
@@ -469,7 +472,7 @@ function construirConsultas(){
 }
 
 function badgeEntidad(it){
-  if(it._origen === "emitida"){
+  if(it._tipo === "emitida"){
     return `<span class="stamp emitida" style="position:static;transform:none;display:inline-block;margin-left:8px;">EMITIDA</span>`;
   }
   const ent = (it.entidad || "").toUpperCase();
@@ -549,17 +552,14 @@ function buscarCartaPorReferencia(clave){
   return todas.find(it => it.numero === numero && String(it.fecha || "").includes(anio));
 }
 
-async function verReferencias(num){
-  document.querySelectorAll("[id^='menuConsulta']").forEach(m => m.style.display = "none");
-  const c = window._dictConsultas[num];
-
+async function abrirReferenciasParaCarta(item){
   const overlay = document.createElement("div");
   overlay.className = "overlay-modal";
   overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
   overlay.innerHTML = `
     <div class="modal-panel" style="max-width:520px;">
-      <h3>📎 Referencias de CONSULTA N° ${String(num).padStart(2,"0")}</h3>
-      <div class="archivo-nombre">N° ${c.emitida.numero} — ${escapeHtml(c.emitida.asunto)}</div>
+      <h3>🔗 Documentos relacionados</h3>
+      <div class="archivo-nombre">N° ${item.numero} — ${escapeHtml(item.asunto)}</div>
       <div id="cuerpoReferencias" style="margin-top:10px;">
         <div class="modal-aviso">🔍 Buscando cartas referentes a esta carta...</div>
       </div>
@@ -569,11 +569,10 @@ async function verReferencias(num){
     </div>`;
   document.body.appendChild(overlay);
 
-  let refsTexto = (c.emitida.referencias || "").trim();
+  let refsTexto = (item.referencias || "").trim();
 
   if(!refsTexto){
-    // Carta vieja sin referencias guardadas todavía: la analizamos ahora, una sola vez.
-    if(!c.emitida.link){
+    if(!item.link){
       document.getElementById("cuerpoReferencias").innerHTML = `<div class="modal-aviso">Esta carta no tiene PDF vinculado — no se puede analizar.</div>`;
       return;
     }
@@ -581,19 +580,20 @@ async function verReferencias(num){
       const res = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ accion: "leerReferenciasDesdeLink", pin: pinSesion, link: c.emitida.link })
+        body: JSON.stringify({ accion: "leerReferenciasDesdeLink", link: item.link })
       });
       const data = await res.json();
       if(!data.ok) throw new Error(data.error || "No se pudo analizar el documento.");
       refsTexto = (data.datos && data.datos.referencias) || "";
 
-      // La guardamos para que la próxima vez ya no haya que volver a analizar
-      await fetch(API_URL, {
+      // Guardamos el resultado para la próxima vez (esto no necesita PIN: solo cachea
+      // algo derivado del propio documento, no es una edición manual de datos)
+      fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ accion: "guardarReferencias", pin: pinSesion, tipo: c.emitida._origen, numero: c.emitida.numero, referencias: refsTexto })
-      });
-      c.emitida.referencias = refsTexto; // cache local por si se reabre en esta misma sesión
+        body: JSON.stringify({ accion: "guardarReferencias", tipo: item._tipo, numero: item.numero, referencias: refsTexto })
+      }).catch(() => {});
+      item.referencias = refsTexto;
     } catch (err) {
       document.getElementById("cuerpoReferencias").innerHTML = `<div class="modal-aviso">⚠️ No se pudo analizar el documento: ${escapeHtml(err.message)}</div>`;
       return;
@@ -601,6 +601,19 @@ async function verReferencias(num){
   }
 
   mostrarListaReferencias(refsTexto);
+}
+
+function abrirReferenciasPorNumero(numero, tipo){
+  const lista = tipo === "emitida" ? DATA.emitidas : DATA.recibidas;
+  const item = lista.find(i => i.numero === numero);
+  if(!item) return;
+  abrirReferenciasParaCarta({ ...item, _tipo: tipo });
+}
+
+function verReferencias(num){
+  document.querySelectorAll("[id^='menuConsulta']").forEach(m => m.style.display = "none");
+  const c = window._dictConsultas[num];
+  abrirReferenciasParaCarta(c.emitida);
 }
 
 function mostrarListaReferencias(refsTexto){
@@ -615,7 +628,7 @@ function mostrarListaReferencias(refsTexto){
       if(encontrada){
         filasHtml += `<div class="bloque-fila">
           <span class="label">N° ${clave.split("-")[0]}</span>
-          <span>${escapeHtml(encontrada.asunto)} ${badgeEntidad({ _origen: encontrada._tipo, entidad: encontrada.entidad })}
+          <span>${escapeHtml(encontrada.asunto)} ${badgeEntidad({ _tipo: encontrada._tipo, entidad: encontrada.entidad })}
             ${encontrada.link ? ` · <a class="link" href="${encontrada.link}" target="_blank" rel="noopener">PDF →</a>` : ""}
           </span>
         </div>`;
