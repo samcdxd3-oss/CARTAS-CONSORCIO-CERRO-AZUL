@@ -413,7 +413,7 @@ function renderLista(lista, termino, main, tipo){
           ${tipo === "emitida" && item.entidad ? `<div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px;">Para: ${escapeHtml(item.entidad)}</div>` : ""}
           <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
             ${item.link ? `<a class="link" href="${item.link}" target="_blank" rel="noopener">📄 Ver PDF →</a>` : ""}
-            <button type="button" onclick="abrirReferenciasPorNumero('${escapeAtributo(item.numero)}','${tipo}')" style="background:transparent;border:none;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;cursor:pointer;padding:0;">🔗 Relacionados</button>
+            <button type="button" onclick="abrirReferenciasPorFila(${item.fila}, '${tipo}')" style="background:transparent;border:none;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;cursor:pointer;padding:0;">🔗 Relacionados</button>
           </div>
         </div>`;
     });
@@ -597,7 +597,7 @@ async function abrirReferenciasParaCarta(item){
       fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ accion: "guardarReferencias", tipo: item._tipo, numero: item.numero, referencias: refsTexto })
+        body: JSON.stringify({ accion: "guardarReferencias", tipo: item._tipo, numero: item.numero, fila: item.fila, referencias: refsTexto })
       }).catch(() => {});
       item.referencias = refsTexto;
     } catch (err) {
@@ -609,9 +609,9 @@ async function abrirReferenciasParaCarta(item){
   mostrarListaReferencias(refsTexto);
 }
 
-function abrirReferenciasPorNumero(numero, tipo){
+function abrirReferenciasPorFila(fila, tipo){
   const lista = tipo === "emitida" ? DATA.emitidas : DATA.recibidas;
-  const item = lista.find(i => i.numero === numero);
+  const item = lista.find(i => i.fila === fila);
   if(!item) return;
   abrirReferenciasParaCarta({ ...item, _tipo: tipo });
 }
@@ -797,6 +797,8 @@ function abrirLinkFila(key){
 async function eliminarFilaExistente(key){
   const tr = document.querySelector(`tr[data-key="${key}"]`);
   const numero = tr.querySelector(".c-numero").value.trim();
+  const idx = parseInt(key.split("_")[1], 10);
+  const item = (tipoFormulario === "emitida" ? DATA.emitidas : DATA.recibidas)[idx];
   if(!confirm(`¿Quitar la carta N° ${numero} de ${tipoFormulario === 'emitida' ? 'Emitidos' : 'Recibidos'}?\n\nEsto borra la fila del Google Sheet Y manda el PDF a la papelera de Drive (recuperable ahí por un tiempo, no se borra para siempre al toque).`)) return;
   if(!pinSesion){ alert("Sesión sin PIN — vuelve a entrar al panel."); return; }
 
@@ -805,12 +807,11 @@ async function eliminarFilaExistente(key){
     const res = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ accion: "eliminarCarta", pin: pinSesion, tipo: tipoFormulario, numero })
+      body: JSON.stringify({ accion: "eliminarCarta", pin: pinSesion, tipo: tipoFormulario, numero, fila: item ? item.fila : undefined })
     });
     const data = await res.json();
     if(!data.ok) throw new Error(data.error || "Error desconocido");
 
-    const idx = parseInt(key.split("_")[1], 10);
     if(tipoFormulario === "emitida") DATA.emitidas.splice(idx, 1); else DATA.recibidas.splice(idx, 1);
     renderFormulario(document.getElementById("main"));
   } catch (err) {
@@ -1142,11 +1143,18 @@ async function autoguardarFila(key){
   if(!valores.numero) return; // todavía no hay nada que guardar en esa fila
   if(!pinSesion){ alert("Sesión sin PIN — vuelve a entrar al panel."); panelDesbloqueado = false; renderFormulario(document.getElementById("main")); return; }
 
+  let filaReal = undefined;
+  if(key.startsWith("existente_")){
+    const idx = parseInt(key.split("_")[1], 10);
+    const item = (tipoFormulario === "emitida" ? DATA.emitidas : DATA.recibidas)[idx];
+    filaReal = item ? item.fila : undefined;
+  }
+
   tr.style.transition = "background-color .3s";
   tr.style.backgroundColor = "#EAF3FD"; // guardando...
 
   try {
-    const body = { accion: "guardarCarta", pin: pinSesion, tipo: tipoFormulario, numero: valores.numero, fecha: valores.fecha || ("DD/MM/" + new Date().getFullYear()), asunto: valores.asunto, entidad: valores.entidad };
+    const body = { accion: "guardarCarta", pin: pinSesion, tipo: tipoFormulario, numero: valores.numero, fecha: valores.fecha || ("DD/MM/" + new Date().getFullYear()), asunto: valores.asunto, entidad: valores.entidad, fila: filaReal };
     if(tipoFormulario === "emitida"){ body.fechaRealizado = valores.fechaRealizado; body.informe = valores.informe; }
     else { body.codigoDe = valores.codigoDe; body.para = valores.para; }
 
