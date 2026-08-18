@@ -544,17 +544,26 @@ document.addEventListener("click", (e) => {
 });
 
 function buscarCartaPorReferencia(clave){
-  const [numero, anio] = clave.split("-");
-  const todas = [
-    ...DATA.emitidas.map(i => ({ ...i, _tipo: "emitida" })),
-    ...DATA.recibidas.map(i => ({ ...i, _tipo: "recibida" }))
-  ];
-  return todas.find(it => it.numero === numero && String(it.fecha || "").includes(anio));
+  const [numero, anio, tipoRef] = clave.split("-");
+
+  if(tipoRef === "cca"){
+    return DATA.emitidas
+      .map(i => ({ ...i, _tipo: "emitida" }))
+      .find(it => it.numero === numero && String(it.fecha || "").includes(anio));
+  }
+
+  const candidatas = DATA.recibidas
+    .map(i => ({ ...i, _tipo: "recibida" }))
+    .filter(it => it.numero === numero && String(it.fecha || "").includes(anio));
+
+  if(tipoRef === "ananea") return candidatas.find(it => (it.entidad || "").toUpperCase().includes("ANANEA"));
+  if(tipoRef === "gdti") return candidatas.find(it => (it.entidad || "").toUpperCase().includes("MUNICIPALIDA"));
+  return candidatas[0]; // tipo de entidad no reconocido: cualquier coincidencia por número/año
 }
 
 function esListaReferenciasValida(texto){
   if(!texto) return false;
-  return /^\d{1,4}-20\d{2}(,\d{1,4}-20\d{2})*$/.test(texto.trim());
+  return /^\d{1,4}-20\d{2}-(cca|ananea|gdti|otro)(,\d{1,4}-20\d{2}-(cca|ananea|gdti|otro))*$/.test(texto.trim());
 }
 
 async function abrirReferenciasParaCarta(item, forzar){
@@ -573,6 +582,7 @@ async function abrirReferenciasParaCarta(item, forzar){
       </div>
     </div>`;
   document.body.appendChild(overlay);
+  window._itemReferenciaActual = item; // se usa para "Volver a analizar", sin pasar por atributos HTML
 
   let refsTexto = forzar ? "" : (item.referencias || "").trim();
   if(!esListaReferenciasValida(refsTexto)) refsTexto = ""; // descarta datos viejos/ajenos guardados en esa columna
@@ -649,9 +659,8 @@ function mostrarListaReferencias(refsTexto, item){
 
   const contenedor = document.getElementById("cuerpoReferencias");
   if(contenedor){
-    const itemJson = item ? JSON.stringify(item).replace(/"/g, "&quot;") : "";
     contenedor.innerHTML = `<div class="bloque">${filasHtml}</div>
-      ${item ? `<button class="btn-secundario" style="margin-top:10px;width:100%;" onclick="this.closest('.overlay-modal').remove(); abrirReferenciasParaCarta(JSON.parse(this.dataset.item), true)" data-item="${itemJson}">🔄 Volver a analizar el PDF</button>` : ""}`;
+      ${item ? `<button class="btn-secundario" style="margin-top:10px;width:100%;" onclick="this.closest('.overlay-modal').remove(); abrirReferenciasParaCarta(window._itemReferenciaActual, true)">🔄 Volver a analizar el PDF</button>` : ""}`;
   }
 }
 
