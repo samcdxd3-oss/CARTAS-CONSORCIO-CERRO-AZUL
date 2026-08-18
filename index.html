@@ -255,6 +255,11 @@
   .modal-preview{ flex:0 0 54%; max-height:82vh; overflow-y:auto; border-radius:8px; }
   .modal-preview img{ width:100%; border-radius:8px; border:1px solid var(--line); display:block; }
   .modal-fields{ flex:1; min-width:0; max-height:82vh; overflow-y:auto; padding-right:6px; }
+  #buscadorRelacionados{
+    width:100%; padding:13px 14px; font-size:16px; font-family:'Inter',sans-serif;
+    border:2px solid var(--ink); border-radius:10px; background:var(--card);
+  }
+  #buscadorRelacionados:focus{ outline:2px solid var(--stamp-teal); }
   @media (max-width: 760px){
     .modal-body{ flex-direction:column; }
     .modal-preview{ flex:none; width:100%; max-height:340px; }
@@ -543,125 +548,87 @@ document.addEventListener("click", (e) => {
   }
 });
 
-function buscarCartaPorReferencia(clave){
-  const [numero, anio, tipoRef] = clave.split("-");
-
-  if(tipoRef === "cca"){
-    return DATA.emitidas
-      .map(i => ({ ...i, _tipo: "emitida" }))
-      .find(it => it.numero === numero && String(it.fecha || "").includes(anio));
-  }
-
-  const candidatas = DATA.recibidas
-    .map(i => ({ ...i, _tipo: "recibida" }))
-    .filter(it => it.numero === numero && String(it.fecha || "").includes(anio));
-
-  if(tipoRef === "ananea") return candidatas.find(it => (it.entidad || "").toUpperCase().includes("ANANEA"));
-  if(tipoRef === "gdti") return candidatas.find(it => (it.entidad || "").toUpperCase().includes("MUNICIPALIDA"));
-  return candidatas[0]; // tipo de entidad no reconocido: cualquier coincidencia por número/año
-}
-
-function esListaReferenciasValida(texto){
-  if(!texto) return false;
-  return /^\d{1,4}-20\d{2}-(cca|ananea|gdti|otro)(,\d{1,4}-20\d{2}-(cca|ananea|gdti|otro))*$/.test(texto.trim());
-}
-
-async function abrirReferenciasParaCarta(item, forzar){
+function abrirRelacionadosManual(item){
   const overlay = document.createElement("div");
   overlay.className = "overlay-modal";
   overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+
+  const match = (item.link || "").match(/\/d\/([a-zA-Z0-9_-]+)/) || (item.link || "").match(/id=([a-zA-Z0-9_-]+)/);
+  const fileId = match ? match[1] : null;
+  const previewUrl = fileId ? `https://drive.google.com/file/d/${fileId}/preview` : null;
+
   overlay.innerHTML = `
-    <div class="modal-panel" style="max-width:520px;">
+    <div class="modal-panel" style="max-width:1180px;">
       <h3>🔗 Documentos relacionados</h3>
       <div class="archivo-nombre">N° ${item.numero} — ${escapeHtml(item.asunto)}</div>
-      <div id="cuerpoReferencias" style="margin-top:10px;">
-        <div class="modal-aviso">🔍 Buscando cartas referentes a esta carta...</div>
+      <div class="modal-body">
+        <div class="modal-preview">
+          ${previewUrl
+            ? `<iframe src="${previewUrl}" style="width:100%;height:78vh;border:1px solid var(--line);border-radius:8px;" allow="autoplay"></iframe>`
+            : `<div class="modal-aviso">Esta carta no tiene PDF vinculado.</div>`}
+        </div>
+        <div class="modal-fields">
+          <label>Lee las Referencias en la carta (izquierda) y busca aquí cada número</label>
+          <input type="text" id="buscadorRelacionados" placeholder="Ej: 324" autocomplete="off">
+          <div id="resultadosRelacionados" style="margin-top:12px;"></div>
+        </div>
       </div>
       <div class="modal-botones">
         <button class="confirmar" onclick="this.closest('.overlay-modal').remove()">Cerrar</button>
       </div>
     </div>`;
+
   document.body.appendChild(overlay);
-  window._itemReferenciaActual = item; // se usa para "Volver a analizar", sin pasar por atributos HTML
 
-  let refsTexto = forzar ? "" : (item.referencias || "").trim();
-  if(!esListaReferenciasValida(refsTexto)) refsTexto = ""; // descarta datos viejos/ajenos guardados en esa columna
+  const input = document.getElementById("buscadorRelacionados");
+  input.addEventListener("input", () => renderResultadosRelacionados(input.value.trim()));
+  input.focus();
+  renderResultadosRelacionados("");
+}
 
-  if(!refsTexto){
-    if(!item.link){
-      document.getElementById("cuerpoReferencias").innerHTML = `<div class="modal-aviso">Esta carta no tiene PDF vinculado — no se puede analizar.</div>`;
-      return;
-    }
-    try {
-      const res = await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ accion: "leerReferenciasDesdeLink", link: item.link })
-      });
-      const data = await res.json();
-      if(!data.ok) throw new Error(data.error || "No se pudo analizar el documento.");
-      refsTexto = (data.datos && data.datos.referencias) || "";
+function renderResultadosRelacionados(termino){
+  const cont = document.getElementById("resultadosRelacionados");
+  if(!cont) return;
 
-      // Guardamos el resultado para la próxima vez (esto no necesita PIN: solo cachea
-      // algo derivado del propio documento, no es una edición manual de datos)
-      fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ accion: "guardarReferencias", tipo: item._tipo, numero: item.numero, fila: item.fila, referencias: refsTexto })
-      }).catch(() => {});
-      item.referencias = refsTexto;
-    } catch (err) {
-      document.getElementById("cuerpoReferencias").innerHTML = `<div class="modal-aviso">⚠️ No se pudo analizar el documento: ${escapeHtml(err.message)}</div>`;
-      return;
-    }
+  if(!termino){
+    cont.innerHTML = `<div class="modal-aviso">Escribe un número, fecha o palabra para buscar entre todas tus cartas.</div>`;
+    return;
   }
 
-  mostrarListaReferencias(refsTexto, item);
+  const todas = [
+    ...DATA.emitidas.map(i => ({ ...i, _tipo: "emitida" })),
+    ...DATA.recibidas.map(i => ({ ...i, _tipo: "recibida" }))
+  ];
+  const t = termino.toUpperCase();
+  const encontradas = todas.filter(it =>
+    [it.numero, it.fecha, it.asunto, it.entidad || ""].some(c => String(c).toUpperCase().includes(t))
+  ).slice(0, 30);
+
+  if(encontradas.length === 0){
+    cont.innerHTML = `<div class="modal-aviso">No se encontró ninguna carta con "${escapeHtml(termino)}" — puede ser de otra entidad, o aún no está subida.</div>`;
+    return;
+  }
+
+  cont.innerHTML = `<div class="bloque">${encontradas.map(it => `
+    <div class="bloque-fila">
+      <span class="label">N° ${it.numero}</span>
+      <span>${escapeHtml(it.asunto)} ${badgeEntidad(it)}
+        ${it.link ? ` · <a class="link" href="${it.link}" target="_blank" rel="noopener">PDF →</a>` : ""}
+      </span>
+    </div>`).join("")}</div>`;
 }
 
 function abrirReferenciasPorFila(fila, tipo){
   const lista = tipo === "emitida" ? DATA.emitidas : DATA.recibidas;
   const item = lista.find(i => i.fila === fila);
   if(!item) return;
-  abrirReferenciasParaCarta({ ...item, _tipo: tipo });
+  abrirRelacionadosManual({ ...item, _tipo: tipo });
 }
 
 function verReferencias(num){
   document.querySelectorAll("[id^='menuConsulta']").forEach(m => m.style.display = "none");
   const c = window._dictConsultas[num];
-  abrirReferenciasParaCarta(c.emitida);
-}
-
-function mostrarListaReferencias(refsTexto, item){
-  const claves = refsTexto ? refsTexto.split(",").filter(Boolean) : [];
-  let filasHtml = "";
-
-  if(claves.length === 0){
-    filasHtml = `<div class="modal-aviso">No se detectaron referencias citadas (con la palabra "CARTA") en esta carta.</div>`;
-  } else {
-    claves.forEach(clave => {
-      const encontrada = buscarCartaPorReferencia(clave);
-      if(encontrada){
-        filasHtml += `<div class="bloque-fila">
-          <span class="label">N° ${clave.split("-")[0]}</span>
-          <span>${escapeHtml(encontrada.asunto)} ${badgeEntidad({ _tipo: encontrada._tipo, entidad: encontrada.entidad })}
-            ${encontrada.link ? ` · <a class="link" href="${encontrada.link}" target="_blank" rel="noopener">PDF →</a>` : ""}
-          </span>
-        </div>`;
-      } else {
-        filasHtml += `<div class="bloque-fila">
-          <span class="label">N° ${clave.split("-")[0]}</span>
-          <span style="color:var(--ink-soft);">No está en el sistema (puede ser de otra entidad, o aún no se subió)</span>
-        </div>`;
-      }
-    });
-  }
-
-  const contenedor = document.getElementById("cuerpoReferencias");
-  if(contenedor){
-    contenedor.innerHTML = `<div class="bloque">${filasHtml}</div>
-      ${item ? `<button class="btn-secundario" style="margin-top:10px;width:100%;" onclick="this.closest('.overlay-modal').remove(); abrirReferenciasParaCarta(window._itemReferenciaActual, true)">🔄 Volver a analizar el PDF</button>` : ""}`;
-  }
+  abrirRelacionadosManual(c.emitida);
 }
 
 function mensajeVacio(termino, entidadFiltro){
