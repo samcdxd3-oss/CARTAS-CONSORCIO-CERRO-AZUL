@@ -369,7 +369,9 @@
     <h1 style="flex:1;">Almacén</h1>
     <img src="logo.png" alt="Consorcio Cerro Azul" style="height:34px;width:auto;">
   </div></header>
-  <div class="estado">🚧 Lo construimos en el próximo paso.</div>
+  <div id="contenidoAlmacen" style="max-width:820px;margin:0 auto;padding:16px;">
+    <div class="estado">Cargando...</div>
+  </div>
 </div>
 
 <div id="moduloRequerimientos" style="display:none;">
@@ -1003,6 +1005,17 @@ async function renderizarPrimeraPagina(file){
   }
 }
 
+// Genera una vista previa tanto de fotos (JPG/PNG) como de PDFs
+async function generarPreviewArchivo(file){
+  if(file.type && file.type.startsWith("image/")){
+    return URL.createObjectURL(file);
+  }
+  if(file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")){
+    return await renderizarPrimeraPagina(file);
+  }
+  return null;
+}
+
 async function manejarArchivo(file){
   document.getElementById("dropzoneTexto").textContent = "🔍 Leyendo el documento con OCR (unos segundos)...";
   document.getElementById("dropzone").classList.add("arrastrando");
@@ -1302,15 +1315,29 @@ async function cargarRequerimientos(){
   }
 }
 
+// ---- Editor de "celdas" reutilizable (Requerimientos y Almacén) ----
+function fechaAISO(fechaTexto){
+  const partes = String(fechaTexto||"").split("/");
+  if(partes.length === 3) return `${partes[2]}-${partes[1].padStart(2,"0")}-${partes[0].padStart(2,"0")}`;
+  return new Date().toISOString().split("T")[0];
+}
+function isoADDMMYYYY(iso){
+  if(!iso) return "";
+  const [a,m,d] = iso.split("-");
+  return `${d}/${m}/${a}`;
+}
+
 function renderRequerimientos(){
   const cont = document.getElementById("contenidoRequerimientos");
   const filtradas = filtroEstadoReq ? DATA_REQ.filter(r => r.estado === filtroEstadoReq) : DATA_REQ;
   const ordenadas = [...filtradas].reverse(); // más recientes primero
-
   const contar = (est) => DATA_REQ.filter(r => r.estado === est).length;
 
   cont.innerHTML = `
-    <label>📥 Subir foto o PDF del requerimiento</label>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+      <button class="btn-secundario" onclick="nuevoRequerimientoManual()">✏️ Nuevo requerimiento (manual)</button>
+    </div>
+    <label>📥 O sube una foto/PDF (se transcribe solo)</label>
     <div class="dropzone" id="dropzoneReq">
       <span class="icono">📄</span>
       <span class="texto" id="dropzoneReqTexto">Arrastra la foto/PDF aquí, o toca para elegirla</span>
@@ -1339,7 +1366,7 @@ function renderRequerimientos(){
     lista.innerHTML = `<div class="modal-aviso">No hay requerimientos ${filtroEstadoReq ? "en este estado" : "todavía"}.</div>`;
     return;
   }
-  lista.innerHTML = ordenadas.map(r => tarjetaRequerimiento(r)).join("");
+  lista.innerHTML = ordenadas.map((r, i) => tarjetaRequerimiento(r, ordenadas.length - i)).join("");
 }
 
 function filtrarReq(estado){
@@ -1347,15 +1374,25 @@ function filtrarReq(estado){
   renderRequerimientos();
 }
 
-function tarjetaRequerimiento(r){
+function tarjetaRequerimiento(r, numeroItem){
   const colorEstado = r.estado === "entregado" ? "var(--cat-supervision)" : r.estado === "pedido" ? "var(--cat-emitida)" : "var(--stamp-orange)";
   const etiquetaEstado = r.estado === "entregado" ? "ENTREGADO" : r.estado === "pedido" ? "PEDIDO REALIZADO" : "PENDIENTE";
   return `
     <div class="card">
       <span class="stamp" style="color:${colorEstado};border-color:${colorEstado};">${etiquetaEstado}</span>
-      <div class="fecha" style="margin-bottom:6px;">${escapeHtml(r.fecha)}</div>
-      <div class="asunto" style="white-space:pre-wrap;">${escapeHtml(r.texto)}</div>
-      ${r.area ? `<div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">📍 Entregado a: ${escapeHtml(r.area)}</div>` : ""}
+      <div style="display:flex;gap:8px;align-items:baseline;margin-bottom:4px;">
+        <span class="numero" style="font-size:12px;">ITEM ${String(numeroItem).padStart(2,"0")}</span>
+        <span class="fecha">${escapeHtml(r.fecha)}</span>
+      </div>
+      <div onclick="editarRequerimiento('${r.id}')" style="cursor:pointer;">
+        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;margin-bottom:4px;">
+          ${r.cantidad ? `<span><b style="color:var(--ink);">${escapeHtml(r.cantidad)}</b> ${escapeHtml(r.unidad||"")}</span>` : ""}
+        </div>
+        <div class="asunto">${escapeHtml(r.descripcion) || "<i style='color:var(--ink-soft);'>(toca para completar)</i>"}</div>
+        ${r.partida ? `<div style="font-size:12.5px;color:var(--ink-soft);margin-top:2px;">📍 Partida: ${escapeHtml(r.partida)}</div>` : ""}
+        ${r.observaciones ? `<div style="font-size:12.5px;color:var(--ink-soft);margin-top:2px;">📝 ${escapeHtml(r.observaciones)}</div>` : ""}
+      </div>
+      ${r.area ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">✅ Entregado a: ${escapeHtml(r.area)}</div>` : ""}
       ${r.link ? `<a class="link" href="${r.link}" target="_blank" rel="noopener">📄 Ver foto/PDF →</a>` : ""}
       <div class="segmentado" style="margin-top:12px;">
         <button type="button" class="${r.estado==='pendiente'?'on':''}" onclick="cambiarEstadoReq('${r.id}', 'pendiente')">Pendiente</button>
@@ -1373,7 +1410,7 @@ async function cambiarEstadoReq(id, nuevoEstado){
   let area = item.area || "";
   if(nuevoEstado === "entregado"){
     const respuesta = prompt("¿A qué área se entregó?", area);
-    if(!respuesta) return; // cancelado
+    if(!respuesta) return;
     area = respuesta;
   }
 
@@ -1384,7 +1421,12 @@ async function cambiarEstadoReq(id, nuevoEstado){
     const res = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ accion: "guardarRequerimiento", pin, id, texto: item.texto, estado: nuevoEstado, area })
+      body: JSON.stringify({
+        accion: "guardarRequerimiento", pin, id,
+        fecha: item.fecha, cantidad: item.cantidad, unidad: item.unidad,
+        descripcion: item.descripcion, partida: item.partida, observaciones: item.observaciones,
+        estado: nuevoEstado, area
+      })
     });
     const data = await res.json();
     if(!data.ok) throw new Error(data.error || "Error desconocido");
@@ -1427,49 +1469,100 @@ async function manejarArchivoReq(file){
 
   let texto = "";
   let error = "";
-  try {
-    const base64 = await archivoABase64(file);
-    const res = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ accion: "leerTextoPlano", pin, archivoBase64: base64, mimeType: file.type || "application/pdf" })
-    });
-    const data = await res.json();
-    if(data.ok) texto = data.texto || "";
-    else error = data.error || "Error desconocido";
-  } catch (err) {
-    error = "Error de conexión: " + err.message;
-  }
+  const [resultadoOCR, preview] = await Promise.all([
+    (async () => {
+      try {
+        const base64 = await archivoABase64(file);
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ accion: "leerTextoPlano", pin, archivoBase64: base64, mimeType: file.type || "application/pdf" })
+        });
+        const data = await res.json();
+        if(data.ok) return { texto: data.texto || "" };
+        return { error: data.error || "Error desconocido" };
+      } catch (err) {
+        return { error: "Error de conexión: " + err.message };
+      }
+    })(),
+    generarPreviewArchivo(file)
+  ]);
+  texto = resultadoOCR.texto || "";
+  error = resultadoOCR.error || "";
 
   dzTexto.textContent = "Arrastra la foto/PDF aquí, o toca para elegirla";
-  abrirModalRequerimiento(file, texto, error);
+  abrirModalBurbujaReq(null, {}, error, file, preview, texto);
 }
 
-function abrirModalRequerimiento(file, texto, error){
+function nuevoRequerimientoManual(){
+  abrirModalBurbujaReq(null, {}, "", null, null, "");
+}
+
+function editarRequerimiento(id){
+  const item = DATA_REQ.find(r => r.id === id);
+  if(!item) return;
+  abrirModalBurbujaReq(item, item, "", null, null, "");
+}
+
+function abrirModalBurbujaReq(itemExistente, datos, error, file, preview, textoOCR){
   const overlay = document.createElement("div");
   overlay.className = "overlay-modal";
   overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+
+  const fechaValor = itemExistente && itemExistente.fecha ? fechaAISO(itemExistente.fecha) : new Date().toISOString().split("T")[0];
+
   overlay.innerHTML = `
-    <div class="modal-panel" style="max-width:520px;">
-      <h3>📋 Revisa el texto transcrito</h3>
-      <div class="archivo-nombre">${escapeHtml(file.name)}</div>
-      ${error ? `<div class="modal-aviso">⚠️ No se pudo leer automáticamente (${escapeHtml(error)}). Escribe el texto a mano.</div>` : ""}
-      <label>Texto del requerimiento (corrige lo que haga falta)</label>
-      <textarea id="reqTextoModal" rows="9" style="width:100%;padding:10px;font-size:14px;border:1.5px solid var(--line);border-radius:8px;">${escapeHtml(texto)}</textarea>
-      <div class="modal-botones">
-        <button class="cancelar" onclick="this.closest('.overlay-modal').remove()">Cancelar</button>
-        <button class="confirmar" id="btnGuardarReq" onclick="guardarNuevoReq()">✅ Guardar</button>
+    <div class="modal-panel" style="max-width:${preview ? "1000px" : "560px"};">
+      <h3>📋 ${itemExistente ? "Editar" : "Nuevo"} requerimiento</h3>
+      ${file ? `<div class="archivo-nombre">${escapeHtml(file.name)}</div>` : ""}
+      ${error ? `<div class="modal-aviso">⚠️ No se pudo leer automáticamente (${escapeHtml(error)}). Completa a mano.</div>` : ""}
+      <div class="modal-body">
+        ${preview ? `<div class="modal-preview"><img src="${preview}" style="width:100%;border-radius:8px;border:1px solid var(--line);"></div>` : ""}
+        <div class="modal-fields" style="${preview ? "" : "flex:1;"}">
+          ${textoOCR ? `<label>Texto leído por el OCR (cópialo a las celdas de abajo)</label>
+            <textarea readonly rows="3" style="width:100%;background:var(--paper-dim);font-size:12px;padding:8px;border-radius:6px;border:1px solid var(--line);margin-bottom:10px;">${escapeHtml(textoOCR)}</textarea>` : ""}
+
+          <label>Fecha</label>
+          <input type="date" id="reqFechaModal" value="${fechaValor}">
+
+          <label>Cantidad</label>
+          <input type="text" id="reqCantidadModal" value="${escapeAtributo(datos.cantidad||"")}">
+
+          <label>Unidad</label>
+          <input type="text" id="reqUnidadModal" value="${escapeAtributo(datos.unidad||"")}" placeholder="UND, KG, BOLSA, ML...">
+
+          <label>Descripción</label>
+          <textarea id="reqDescripcionModal" rows="2">${escapeHtml(datos.descripcion||"")}</textarea>
+
+          <label>Partida a ejecutar</label>
+          <input type="text" id="reqPartidaModal" value="${escapeAtributo(datos.partida||"")}">
+
+          <label>Observaciones</label>
+          <textarea id="reqObservacionesModal" rows="2">${escapeHtml(datos.observaciones||"")}</textarea>
+
+          <div class="modal-botones">
+            <button class="cancelar" onclick="this.closest('.overlay-modal').remove()">Cancelar</button>
+            <button class="confirmar" id="btnGuardarReq" onclick="guardarBurbujaReq(${itemExistente ? `'${itemExistente.id}'` : "null"})">✅ Guardar</button>
+          </div>
+          <div class="msg-form" id="msgReq"></div>
+        </div>
       </div>
-      <div class="msg-form" id="msgReq"></div>
     </div>`;
+
   document.body.appendChild(overlay);
-  window._archivoReqActual = file;
+  window._archivoReqActual = file || null;
 }
 
-async function guardarNuevoReq(){
-  const texto = document.getElementById("reqTextoModal").value.trim();
+async function guardarBurbujaReq(idExistente){
+  const cantidad = document.getElementById("reqCantidadModal").value.trim();
+  const unidad = document.getElementById("reqUnidadModal").value.trim();
+  const descripcion = document.getElementById("reqDescripcionModal").value.trim();
+  const partida = document.getElementById("reqPartidaModal").value.trim();
+  const observaciones = document.getElementById("reqObservacionesModal").value.trim();
+  const fechaISO = document.getElementById("reqFechaModal").value;
   const msg = document.getElementById("msgReq");
-  if(!texto){ msg.textContent = "Escribe algo de texto."; msg.className = "msg-form err"; return; }
+
+  if(!descripcion && !cantidad){ msg.textContent = "Completa al menos la Cantidad o la Descripción."; msg.className = "msg-form err"; return; }
 
   const pin = await pedirPin();
   if(!pin) return;
@@ -1477,8 +1570,15 @@ async function guardarNuevoReq(){
   const btn = document.getElementById("btnGuardarReq");
   btn.disabled = true; btn.textContent = "Guardando...";
 
+  const itemPrevio = idExistente ? DATA_REQ.find(r => r.id === idExistente) : null;
+
   try {
-    const body = { accion: "guardarRequerimiento", pin, texto, estado: "pendiente", area: "" };
+    const body = {
+      accion: "guardarRequerimiento", pin, id: idExistente,
+      fecha: isoADDMMYYYY(fechaISO), cantidad, unidad, descripcion, partida, observaciones,
+      estado: itemPrevio ? itemPrevio.estado : "pendiente",
+      area: itemPrevio ? itemPrevio.area : ""
+    };
     if(window._archivoReqActual){
       body.archivoBase64 = await archivoABase64(window._archivoReqActual);
       body.mimeType = window._archivoReqActual.type || "application/pdf";
@@ -1493,6 +1593,267 @@ async function guardarNuevoReq(){
 
     document.querySelector(".overlay-modal").remove();
     await cargarRequerimientos();
+
+    if(!idExistente && confirm("✅ Guardado. ¿Agregar otro requerimiento?")) nuevoRequerimientoManual();
+  } catch (err) {
+    msg.textContent = "❌ " + err.message;
+    msg.className = "msg-form err";
+    btn.disabled = false; btn.textContent = "✅ Guardar";
+  }
+}
+
+// ===================== MÓDULO: ALMACÉN =====================
+let DATA_ALM = [];
+let filtroTipoAlm = null;
+
+async function cargarAlmacen(){
+  const cont = document.getElementById("contenidoAlmacen");
+  cont.innerHTML = `<div class="estado">Cargando...</div>`;
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ accion: "leerAlmacen" })
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+    DATA_ALM = data.items;
+    renderAlmacen();
+  } catch (err) {
+    cont.innerHTML = `<div class="estado error">No se pudo cargar: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderAlmacen(){
+  const cont = document.getElementById("contenidoAlmacen");
+  const filtradas = filtroTipoAlm ? DATA_ALM.filter(a => a.tipo === filtroTipoAlm) : DATA_ALM;
+  const ordenadas = [...filtradas].reverse();
+  const contar = (t) => DATA_ALM.filter(a => a.tipo === t).length;
+
+  cont.innerHTML = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+      <button class="btn-secundario" onclick="nuevoAlmacenManual()">✏️ Nuevo movimiento (manual)</button>
+    </div>
+    <label>📥 O sube una foto/PDF (guía, factura, vale, etc.)</label>
+    <div class="dropzone" id="dropzoneAlm">
+      <span class="icono">📦</span>
+      <span class="texto" id="dropzoneAlmTexto">Arrastra la foto/PDF aquí, o toca para elegirla</span>
+    </div>
+    <input type="file" id="almArchivoOculto" accept="image/*,application/pdf" style="display:none">
+
+    <div class="chips" style="margin:14px 0;">
+      <div class="chip ${filtroTipoAlm===null?'on':''}" onclick="filtrarAlm(null)">Todos (${DATA_ALM.length})</div>
+      <div class="chip ${filtroTipoAlm==='entrada'?'on':''}" onclick="filtrarAlm('entrada')">Entradas (${contar('entrada')})</div>
+      <div class="chip ${filtroTipoAlm==='salida'?'on':''}" onclick="filtrarAlm('salida')">Salidas (${contar('salida')})</div>
+    </div>
+
+    <div id="listaAlmacen"></div>`;
+
+  const dz = document.getElementById("dropzoneAlm");
+  const inputOculto = document.getElementById("almArchivoOculto");
+  dz.addEventListener("click", () => inputOculto.click());
+  inputOculto.addEventListener("change", () => { if(inputOculto.files[0]) manejarArchivoAlm(inputOculto.files[0]); });
+  ["dragover","dragenter"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("arrastrando"); }));
+  ["dragleave","drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("arrastrando"); }));
+  dz.addEventListener("drop", e => { if(e.dataTransfer.files[0]) manejarArchivoAlm(e.dataTransfer.files[0]); });
+
+  const lista = document.getElementById("listaAlmacen");
+  if(ordenadas.length === 0){
+    lista.innerHTML = `<div class="modal-aviso">No hay movimientos ${filtroTipoAlm ? "de este tipo" : "todavía"}.</div>`;
+    return;
+  }
+  lista.innerHTML = ordenadas.map((a, i) => tarjetaAlmacen(a, ordenadas.length - i)).join("");
+}
+
+function filtrarAlm(tipo){
+  filtroTipoAlm = tipo;
+  renderAlmacen();
+}
+
+function tarjetaAlmacen(a, numeroItem){
+  const esEntrada = a.tipo === "entrada";
+  const color = esEntrada ? "var(--cat-supervision)" : "var(--stamp-orange)";
+  return `
+    <div class="card">
+      <span class="stamp" style="color:${color};border-color:${color};">${esEntrada ? "ENTRADA" : "SALIDA"}</span>
+      <div style="display:flex;gap:8px;align-items:baseline;margin-bottom:4px;">
+        <span class="numero" style="font-size:12px;">ITEM ${String(numeroItem).padStart(2,"0")}</span>
+        <span class="fecha">${escapeHtml(a.fecha)}</span>
+      </div>
+      <div onclick="editarAlmacen('${a.id}')" style="cursor:pointer;">
+        ${a.cantidad ? `<div style="font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:15px;color:${color};margin-bottom:4px;">${escapeHtml(a.cantidad)} ${escapeHtml(a.unidad||"")}</div>` : ""}
+        <div class="asunto">${escapeHtml(a.descripcion) || "<i style='color:var(--ink-soft);'>(toca para completar)</i>"}</div>
+        ${a.observaciones ? `<div style="font-size:12.5px;color:var(--ink-soft);margin-top:2px;">📝 ${escapeHtml(a.observaciones)}</div>` : ""}
+      </div>
+      ${a.link ? `<a class="link" href="${a.link}" target="_blank" rel="noopener">📄 Ver foto/PDF →</a>` : ""}
+      <button class="btn-fila borrar" style="margin-top:10px;width:34px;" onclick="eliminarAlm('${a.id}')" title="Quitar">✕</button>
+    </div>`;
+}
+
+async function eliminarAlm(id){
+  if(!confirm("¿Quitar este movimiento?\n\nEsto borra el registro y manda la foto/PDF a la papelera de Drive.")) return;
+  const pin = await pedirPin();
+  if(!pin) return;
+
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ accion: "eliminarAlmacen", pin, id })
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+    DATA_ALM = DATA_ALM.filter(a => a.id !== id);
+    renderAlmacen();
+  } catch (err) {
+    alert("No se pudo eliminar: " + err.message);
+    pinSesion = "";
+  }
+}
+
+async function manejarArchivoAlm(file){
+  const dzTexto = document.getElementById("dropzoneAlmTexto");
+  dzTexto.textContent = "🔍 Leyendo el documento con OCR...";
+
+  const pin = await pedirPin();
+  if(!pin){ dzTexto.textContent = "Arrastra la foto/PDF aquí, o toca para elegirla"; return; }
+
+  let texto = "";
+  let error = "";
+  const [resultadoOCR, preview] = await Promise.all([
+    (async () => {
+      try {
+        const base64 = await archivoABase64(file);
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ accion: "leerTextoPlano", pin, archivoBase64: base64, mimeType: file.type || "application/pdf" })
+        });
+        const data = await res.json();
+        if(data.ok) return { texto: data.texto || "" };
+        return { error: data.error || "Error desconocido" };
+      } catch (err) {
+        return { error: "Error de conexión: " + err.message };
+      }
+    })(),
+    generarPreviewArchivo(file)
+  ]);
+  texto = resultadoOCR.texto || "";
+  error = resultadoOCR.error || "";
+
+  dzTexto.textContent = "Arrastra la foto/PDF aquí, o toca para elegirla";
+  abrirModalBurbujaAlm(null, {}, error, file, preview, texto);
+}
+
+function nuevoAlmacenManual(){
+  abrirModalBurbujaAlm(null, {}, "", null, null, "");
+}
+
+function editarAlmacen(id){
+  const item = DATA_ALM.find(a => a.id === id);
+  if(!item) return;
+  abrirModalBurbujaAlm(item, item, "", null, null, "");
+}
+
+function abrirModalBurbujaAlm(itemExistente, datos, error, file, preview, textoOCR){
+  const overlay = document.createElement("div");
+  overlay.className = "overlay-modal";
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+
+  const tipoInicial = itemExistente ? itemExistente.tipo : "entrada";
+  const fechaValor = itemExistente && itemExistente.fecha ? fechaAISO(itemExistente.fecha) : new Date().toISOString().split("T")[0];
+
+  overlay.innerHTML = `
+    <div class="modal-panel" style="max-width:${preview ? "1000px" : "560px"};">
+      <h3>📦 ${itemExistente ? "Editar" : "Nuevo"} movimiento</h3>
+      ${file ? `<div class="archivo-nombre">${escapeHtml(file.name)}</div>` : ""}
+      ${error ? `<div class="modal-aviso">⚠️ No se pudo leer automáticamente (${escapeHtml(error)}). Completa a mano.</div>` : ""}
+      <div class="modal-body">
+        ${preview ? `<div class="modal-preview"><img src="${preview}" style="width:100%;border-radius:8px;border:1px solid var(--line);"></div>` : ""}
+        <div class="modal-fields" style="${preview ? "" : "flex:1;"}">
+          ${textoOCR ? `<label>Texto leído por el OCR (cópialo a las celdas de abajo)</label>
+            <textarea readonly rows="3" style="width:100%;background:var(--paper-dim);font-size:12px;padding:8px;border-radius:6px;border:1px solid var(--line);margin-bottom:10px;">${escapeHtml(textoOCR)}</textarea>` : ""}
+
+          <label>Tipo</label>
+          <div class="segmentado">
+            <button type="button" id="almTipoEntrada" class="${tipoInicial==='entrada'?'on':''}" onclick="cambiarTipoAlmModal('entrada')">Entrada</button>
+            <button type="button" id="almTipoSalida" class="${tipoInicial==='salida'?'on':''}" onclick="cambiarTipoAlmModal('salida')">Salida</button>
+          </div>
+
+          <label>Fecha</label>
+          <input type="date" id="almFechaModal" value="${fechaValor}">
+
+          <label>Cantidad</label>
+          <input type="text" id="almCantidadModal" value="${escapeAtributo(datos.cantidad||"")}">
+
+          <label>Unidad</label>
+          <input type="text" id="almUnidadModal" value="${escapeAtributo(datos.unidad||"")}" placeholder="UND, KG, BOLSA, ML...">
+
+          <label>Descripción</label>
+          <textarea id="almDescripcionModal" rows="2">${escapeHtml(datos.descripcion||"")}</textarea>
+
+          <label>Observaciones</label>
+          <textarea id="almObservacionesModal" rows="2">${escapeHtml(datos.observaciones||"")}</textarea>
+
+          <div class="modal-botones">
+            <button class="cancelar" onclick="this.closest('.overlay-modal').remove()">Cancelar</button>
+            <button class="confirmar" id="btnGuardarAlm" onclick="guardarBurbujaAlm(${itemExistente ? `'${itemExistente.id}'` : "null"})">✅ Guardar</button>
+          </div>
+          <div class="msg-form" id="msgAlm"></div>
+        </div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  window._tipoAlmModalActual = tipoInicial;
+  window._archivoAlmActual = file || null;
+}
+
+function cambiarTipoAlmModal(tipo){
+  window._tipoAlmModalActual = tipo;
+  document.getElementById("almTipoEntrada").classList.toggle("on", tipo === "entrada");
+  document.getElementById("almTipoSalida").classList.toggle("on", tipo === "salida");
+}
+
+async function guardarBurbujaAlm(idExistente){
+  const cantidad = document.getElementById("almCantidadModal").value.trim();
+  const unidad = document.getElementById("almUnidadModal").value.trim();
+  const descripcion = document.getElementById("almDescripcionModal").value.trim();
+  const observaciones = document.getElementById("almObservacionesModal").value.trim();
+  const fechaISO = document.getElementById("almFechaModal").value;
+  const msg = document.getElementById("msgAlm");
+
+  if(!descripcion && !cantidad){ msg.textContent = "Completa al menos la Cantidad o la Descripción."; msg.className = "msg-form err"; return; }
+
+  const pin = await pedirPin();
+  if(!pin) return;
+
+  const btn = document.getElementById("btnGuardarAlm");
+  btn.disabled = true; btn.textContent = "Guardando...";
+
+  try {
+    const body = {
+      accion: "guardarAlmacen", pin, id: idExistente,
+      fecha: isoADDMMYYYY(fechaISO),
+      tipo: window._tipoAlmModalActual || "entrada",
+      cantidad, unidad, descripcion, observaciones
+    };
+    if(window._archivoAlmActual){
+      body.archivoBase64 = await archivoABase64(window._archivoAlmActual);
+      body.mimeType = window._archivoAlmActual.type || "application/pdf";
+    }
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+
+    document.querySelector(".overlay-modal").remove();
+    await cargarAlmacen();
+
+    if(!idExistente && confirm("✅ Guardado. ¿Agregar otro movimiento?")) nuevoAlmacenManual();
   } catch (err) {
     msg.textContent = "❌ " + err.message;
     msg.className = "msg-form err";
@@ -1503,6 +1864,7 @@ async function guardarNuevoReq(){
 // ===================== NAVEGACIÓN ENTRE MÓDULOS =====================
 let datosCartasCargados = false;
 let datosReqCargados = false;
+let datosAlmCargados = false;
 
 function irAModulo(nombre){
   document.getElementById("pantallaInicio").style.display = "none";
@@ -1515,6 +1877,7 @@ function irAModulo(nombre){
     if(!datosCartasCargados){ datosCartasCargados = true; cargarDatos(); }
   } else if(nombre === "almacen"){
     document.getElementById("moduloAlmacen").style.display = "block";
+    if(!datosAlmCargados){ datosAlmCargados = true; cargarAlmacen(); }
   } else if(nombre === "requerimientos"){
     document.getElementById("moduloRequerimientos").style.display = "block";
     if(!datosReqCargados){ datosReqCargados = true; cargarRequerimientos(); }
