@@ -378,7 +378,9 @@
     <h1 style="flex:1;">Requerimientos</h1>
     <img src="logo.png" alt="Consorcio Cerro Azul" style="height:34px;width:auto;">
   </div></header>
-  <div class="estado">🚧 Lo construimos en el próximo paso.</div>
+  <div id="contenidoRequerimientos" style="max-width:820px;margin:0 auto;padding:16px;">
+    <div class="estado">Cargando...</div>
+  </div>
 </div>
 
 <button id="btnScroll" onclick="toggleScroll()">↓</button>
@@ -688,7 +690,7 @@ function renderResultadosRelacionados(termino){
 
   cont.innerHTML = encontradas.map(it => `
     <div class="resultado-busqueda">
-      <span class="label">N° ${it.numero}</span>
+      <span class="label">N° ${it.numero}<br><span style="font-weight:400;opacity:.75;">${escapeHtml(it.fecha || "")}</span></span>
       <span>${escapeHtml(it.asunto)} ${badgeEntidad(it)}
         ${it.link ? ` · <a class="link" href="${it.link}" target="_blank" rel="noopener">PDF →</a>` : ""}
       </span>
@@ -1270,8 +1272,237 @@ if("serviceWorker" in navigator){
   });
 }
 
+// ===================== MÓDULO: REQUERIMIENTOS =====================
+let DATA_REQ = [];
+let filtroEstadoReq = null;
+
+async function pedirPin(){
+  if(pinSesion) return pinSesion;
+  const val = prompt("Ingresa el PIN para hacer este cambio:");
+  if(!val) return null;
+  pinSesion = val;
+  return val;
+}
+
+async function cargarRequerimientos(){
+  const cont = document.getElementById("contenidoRequerimientos");
+  cont.innerHTML = `<div class="estado">Cargando...</div>`;
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ accion: "leerRequerimientos" })
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+    DATA_REQ = data.items;
+    renderRequerimientos();
+  } catch (err) {
+    cont.innerHTML = `<div class="estado error">No se pudo cargar: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderRequerimientos(){
+  const cont = document.getElementById("contenidoRequerimientos");
+  const filtradas = filtroEstadoReq ? DATA_REQ.filter(r => r.estado === filtroEstadoReq) : DATA_REQ;
+  const ordenadas = [...filtradas].reverse(); // más recientes primero
+
+  const contar = (est) => DATA_REQ.filter(r => r.estado === est).length;
+
+  cont.innerHTML = `
+    <label>📥 Subir foto o PDF del requerimiento</label>
+    <div class="dropzone" id="dropzoneReq">
+      <span class="icono">📄</span>
+      <span class="texto" id="dropzoneReqTexto">Arrastra la foto/PDF aquí, o toca para elegirla</span>
+    </div>
+    <input type="file" id="reqArchivoOculto" accept="image/*,application/pdf" style="display:none">
+
+    <div class="chips" style="margin:14px 0;">
+      <div class="chip ${filtroEstadoReq===null?'on':''}" onclick="filtrarReq(null)">Todos (${DATA_REQ.length})</div>
+      <div class="chip ${filtroEstadoReq==='pendiente'?'on':''}" onclick="filtrarReq('pendiente')">Pendiente (${contar('pendiente')})</div>
+      <div class="chip ${filtroEstadoReq==='pedido'?'on':''}" onclick="filtrarReq('pedido')">Pedido realizado (${contar('pedido')})</div>
+      <div class="chip ${filtroEstadoReq==='entregado'?'on':''}" onclick="filtrarReq('entregado')">Entregado (${contar('entregado')})</div>
+    </div>
+
+    <div id="listaRequerimientos"></div>`;
+
+  const dz = document.getElementById("dropzoneReq");
+  const inputOculto = document.getElementById("reqArchivoOculto");
+  dz.addEventListener("click", () => inputOculto.click());
+  inputOculto.addEventListener("change", () => { if(inputOculto.files[0]) manejarArchivoReq(inputOculto.files[0]); });
+  ["dragover","dragenter"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("arrastrando"); }));
+  ["dragleave","drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("arrastrando"); }));
+  dz.addEventListener("drop", e => { if(e.dataTransfer.files[0]) manejarArchivoReq(e.dataTransfer.files[0]); });
+
+  const lista = document.getElementById("listaRequerimientos");
+  if(ordenadas.length === 0){
+    lista.innerHTML = `<div class="modal-aviso">No hay requerimientos ${filtroEstadoReq ? "en este estado" : "todavía"}.</div>`;
+    return;
+  }
+  lista.innerHTML = ordenadas.map(r => tarjetaRequerimiento(r)).join("");
+}
+
+function filtrarReq(estado){
+  filtroEstadoReq = estado;
+  renderRequerimientos();
+}
+
+function tarjetaRequerimiento(r){
+  const colorEstado = r.estado === "entregado" ? "var(--cat-supervision)" : r.estado === "pedido" ? "var(--cat-emitida)" : "var(--stamp-orange)";
+  const etiquetaEstado = r.estado === "entregado" ? "ENTREGADO" : r.estado === "pedido" ? "PEDIDO REALIZADO" : "PENDIENTE";
+  return `
+    <div class="card">
+      <span class="stamp" style="color:${colorEstado};border-color:${colorEstado};">${etiquetaEstado}</span>
+      <div class="fecha" style="margin-bottom:6px;">${escapeHtml(r.fecha)}</div>
+      <div class="asunto" style="white-space:pre-wrap;">${escapeHtml(r.texto)}</div>
+      ${r.area ? `<div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">📍 Entregado a: ${escapeHtml(r.area)}</div>` : ""}
+      ${r.link ? `<a class="link" href="${r.link}" target="_blank" rel="noopener">📄 Ver foto/PDF →</a>` : ""}
+      <div class="segmentado" style="margin-top:12px;">
+        <button type="button" class="${r.estado==='pendiente'?'on':''}" onclick="cambiarEstadoReq('${r.id}', 'pendiente')">Pendiente</button>
+        <button type="button" class="${r.estado==='pedido'?'on':''}" onclick="cambiarEstadoReq('${r.id}', 'pedido')">Pedido</button>
+        <button type="button" class="${r.estado==='entregado'?'on':''}" onclick="cambiarEstadoReq('${r.id}', 'entregado')">Entregado</button>
+      </div>
+      <button class="btn-fila borrar" style="margin-top:10px;width:34px;" onclick="eliminarReq('${r.id}')" title="Quitar">✕</button>
+    </div>`;
+}
+
+async function cambiarEstadoReq(id, nuevoEstado){
+  const item = DATA_REQ.find(r => r.id === id);
+  if(!item) return;
+
+  let area = item.area || "";
+  if(nuevoEstado === "entregado"){
+    const respuesta = prompt("¿A qué área se entregó?", area);
+    if(!respuesta) return; // cancelado
+    area = respuesta;
+  }
+
+  const pin = await pedirPin();
+  if(!pin) return;
+
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ accion: "guardarRequerimiento", pin, id, texto: item.texto, estado: nuevoEstado, area })
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+    item.estado = nuevoEstado;
+    item.area = area;
+    renderRequerimientos();
+  } catch (err) {
+    alert("No se pudo actualizar: " + err.message);
+    pinSesion = "";
+  }
+}
+
+async function eliminarReq(id){
+  if(!confirm("¿Quitar este requerimiento?\n\nEsto borra el registro y manda la foto/PDF a la papelera de Drive.")) return;
+  const pin = await pedirPin();
+  if(!pin) return;
+
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ accion: "eliminarRequerimiento", pin, id })
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+    DATA_REQ = DATA_REQ.filter(r => r.id !== id);
+    renderRequerimientos();
+  } catch (err) {
+    alert("No se pudo eliminar: " + err.message);
+    pinSesion = "";
+  }
+}
+
+async function manejarArchivoReq(file){
+  const dzTexto = document.getElementById("dropzoneReqTexto");
+  dzTexto.textContent = "🔍 Leyendo el documento con OCR...";
+
+  const pin = await pedirPin();
+  if(!pin){ dzTexto.textContent = "Arrastra la foto/PDF aquí, o toca para elegirla"; return; }
+
+  let texto = "";
+  let error = "";
+  try {
+    const base64 = await archivoABase64(file);
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ accion: "leerTextoPlano", pin, archivoBase64: base64, mimeType: file.type || "application/pdf" })
+    });
+    const data = await res.json();
+    if(data.ok) texto = data.texto || "";
+    else error = data.error || "Error desconocido";
+  } catch (err) {
+    error = "Error de conexión: " + err.message;
+  }
+
+  dzTexto.textContent = "Arrastra la foto/PDF aquí, o toca para elegirla";
+  abrirModalRequerimiento(file, texto, error);
+}
+
+function abrirModalRequerimiento(file, texto, error){
+  const overlay = document.createElement("div");
+  overlay.className = "overlay-modal";
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-panel" style="max-width:520px;">
+      <h3>📋 Revisa el texto transcrito</h3>
+      <div class="archivo-nombre">${escapeHtml(file.name)}</div>
+      ${error ? `<div class="modal-aviso">⚠️ No se pudo leer automáticamente (${escapeHtml(error)}). Escribe el texto a mano.</div>` : ""}
+      <label>Texto del requerimiento (corrige lo que haga falta)</label>
+      <textarea id="reqTextoModal" rows="9" style="width:100%;padding:10px;font-size:14px;border:1.5px solid var(--line);border-radius:8px;">${escapeHtml(texto)}</textarea>
+      <div class="modal-botones">
+        <button class="cancelar" onclick="this.closest('.overlay-modal').remove()">Cancelar</button>
+        <button class="confirmar" id="btnGuardarReq" onclick="guardarNuevoReq()">✅ Guardar</button>
+      </div>
+      <div class="msg-form" id="msgReq"></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  window._archivoReqActual = file;
+}
+
+async function guardarNuevoReq(){
+  const texto = document.getElementById("reqTextoModal").value.trim();
+  const msg = document.getElementById("msgReq");
+  if(!texto){ msg.textContent = "Escribe algo de texto."; msg.className = "msg-form err"; return; }
+
+  const pin = await pedirPin();
+  if(!pin) return;
+
+  const btn = document.getElementById("btnGuardarReq");
+  btn.disabled = true; btn.textContent = "Guardando...";
+
+  try {
+    const body = { accion: "guardarRequerimiento", pin, texto, estado: "pendiente", area: "" };
+    if(window._archivoReqActual){
+      body.archivoBase64 = await archivoABase64(window._archivoReqActual);
+      body.mimeType = window._archivoReqActual.type || "application/pdf";
+    }
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+
+    document.querySelector(".overlay-modal").remove();
+    await cargarRequerimientos();
+  } catch (err) {
+    msg.textContent = "❌ " + err.message;
+    msg.className = "msg-form err";
+    btn.disabled = false; btn.textContent = "✅ Guardar";
+  }
+}
+
 // ===================== NAVEGACIÓN ENTRE MÓDULOS =====================
 let datosCartasCargados = false;
+let datosReqCargados = false;
 
 function irAModulo(nombre){
   document.getElementById("pantallaInicio").style.display = "none";
@@ -1286,6 +1517,7 @@ function irAModulo(nombre){
     document.getElementById("moduloAlmacen").style.display = "block";
   } else if(nombre === "requerimientos"){
     document.getElementById("moduloRequerimientos").style.display = "block";
+    if(!datosReqCargados){ datosReqCargados = true; cargarRequerimientos(); }
   }
   window.scrollTo(0, 0);
 }
