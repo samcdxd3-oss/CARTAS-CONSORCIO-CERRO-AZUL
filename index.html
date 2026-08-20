@@ -1690,6 +1690,13 @@ async function abrirModalRecorte(tipo, grupoId, file){
     caja.style.display = "none";
     if((x2 - x1) < 8 || (y2 - y1) < 8) return;
 
+    // Congelamos AQUÍ mismo a qué campo/fila/tipo pertenece ESTE recorte —
+    // así, si el usuario cambia de tijera mientras este todavía está cargando,
+    // el resultado de este recorte no se mete en el campo nuevo por error.
+    const campoDeEsteRecorte = _recorte.campoActivo;
+    const filaInicialDeEsteRecorte = _recorte.filaActivaIndex;
+    const tipoDeEsteRecorte = _recorte.tipo;
+
     const escalaX = img.naturalWidth / rect.width;
     const escalaY = img.naturalHeight / rect.height;
     const sx = x1 * escalaX, sy = y1 * escalaY, sw = (x2 - x1) * escalaX, sh = (y2 - y1) * escalaY;
@@ -1698,7 +1705,7 @@ async function abrirModalRecorte(tipo, grupoId, file){
     canvas.width = sw; canvas.height = sh;
     canvas.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
 
-    const targetInput = document.querySelector(`[data-fila="${_recorte.filaActivaIndex}"][data-campo="${_recorte.campoActivo}"]`);
+    const targetInput = document.querySelector(`[data-fila="${filaInicialDeEsteRecorte}"][data-campo="${campoDeEsteRecorte}"]`);
     if(targetInput){ targetInput.value = "🔍 leyendo..."; targetInput.disabled = true; }
 
     try {
@@ -1722,30 +1729,33 @@ async function abrirModalRecorte(tipo, grupoId, file){
       // ¿El recorte trae más de un valor (abarcó varias filas de la tabla)?
       const camposCortos = ["codigo", "cantidad", "unidad", "peso"];
       let valores = String(data.texto || "").split("\n").map(s => s.trim()).filter(Boolean);
-      if(valores.length <= 1 && camposCortos.includes(_recorte.campoActivo)){
+      if(valores.length <= 1 && camposCortos.includes(campoDeEsteRecorte)){
         const partes = String(data.texto || "").trim().split(/\s+/).filter(Boolean);
         if(partes.length > 1) valores = partes;
       }
       if(valores.length === 0) valores = [""];
 
-      // Escribe cada valor en la celda correspondiente de esa columna (crece la columna si hace falta)
+      // Escribe cada valor en la celda correspondiente de ESTE campo (el que estaba activo
+      // cuando arrancó este recorte), creciendo la columna si hace falta.
       valores.forEach((valor, i) => {
-        const filaDestino = _recorte.filaActivaIndex + i;
-        asegurarFilaRecorte(filaDestino, _recorte.tipo);
-        const input = document.querySelector(`[data-fila="${filaDestino}"][data-campo="${_recorte.campoActivo}"]`);
+        const filaDestino = filaInicialDeEsteRecorte + i;
+        asegurarFilaRecorte(filaDestino, tipoDeEsteRecorte);
+        const input = document.querySelector(`[data-fila="${filaDestino}"][data-campo="${campoDeEsteRecorte}"]`);
         if(input) input.value = valor.replace(/\s+/g, " ").trim();
       });
 
-      // Avanza el ítem activo dentro de ESTE MISMO campo, para que el próximo recorte
-      // (del mismo campo) caiga solo en la fila siguiente. Al cambiar de campo, se reinicia a 1.
-      _recorte.filaActivaIndex += valores.length;
-      document.getElementById("filaActivaRecorteLabel").textContent = _recorte.filaActivaIndex + 1;
-      actualizarResaltadoFilaActiva();
+      // Solo movemos el "ítem activo" visible si el usuario SIGUE en el mismo campo
+      // de cuando arrancó este recorte — si ya cambió de tijera, no le tocamos su posición nueva.
+      if(_recorte.campoActivo === campoDeEsteRecorte){
+        _recorte.filaActivaIndex = filaInicialDeEsteRecorte + valores.length;
+        document.getElementById("filaActivaRecorteLabel").textContent = _recorte.filaActivaIndex + 1;
+        actualizarResaltadoFilaActiva();
+      }
 
       const msg = document.getElementById("msgRecorte");
       msg.textContent = valores.length > 1
-        ? `Se detectaron ${valores.length} valores — repartidos, y el ítem activo avanzó al ${_recorte.filaActivaIndex + 1}.`
-        : `Listo — el ítem activo avanzó al ${_recorte.filaActivaIndex + 1} para el próximo recorte de este mismo campo.`;
+        ? `Se detectaron ${valores.length} valores en "${campoDeEsteRecorte}" — repartidos desde el ítem ${filaInicialDeEsteRecorte + 1}.`
+        : `"${campoDeEsteRecorte}" (ítem ${filaInicialDeEsteRecorte + 1}) leído correctamente.`;
       msg.className = "msg-form";
     } catch (err) {
       if(targetInput){ targetInput.disabled = false; targetInput.value = ""; }
