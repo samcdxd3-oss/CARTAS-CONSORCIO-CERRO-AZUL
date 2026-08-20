@@ -1286,7 +1286,7 @@ if("serviceWorker" in navigator){
 }
 
 // ===================== MÓDULO: REQUERIMIENTOS =====================
-let DATA_REQ = [];
+let DATA_REQ = []; // array de GRUPOS, cada uno con .items[]
 let filtroEstadoReq = null;
 
 async function pedirPin(){
@@ -1315,44 +1315,87 @@ async function cargarRequerimientos(){
   }
 }
 
-// ---- Editor de "celdas" reutilizable (Requerimientos y Almacén) ----
-function fechaAISO(fechaTexto){
-  const partes = String(fechaTexto||"").split("/");
-  if(partes.length === 3) return `${partes[2]}-${partes[1].padStart(2,"0")}-${partes[0].padStart(2,"0")}`;
-  return new Date().toISOString().split("T")[0];
-}
-function isoADDMMYYYY(iso){
-  if(!iso) return "";
-  const [a,m,d] = iso.split("-");
-  return `${d}/${m}/${a}`;
+// Recorta el texto del OCR para quedarnos solo con lo que viene DESPUÉS del
+// encabezado de la tabla (evita leer basura de "Lugar/Obra/Solicitado por...")
+function recortarDesdeEncabezadoTabla(texto){
+  const mayus = texto.toUpperCase();
+  const marcadores = ["DESCRIPCION", "DESCRIPCIÓN"];
+  let idx = -1;
+  marcadores.forEach(m => {
+    const pos = mayus.indexOf(m);
+    if(pos !== -1 && (idx === -1 || pos < idx)) idx = pos;
+  });
+  if(idx === -1) return texto;
+  const finLinea = texto.indexOf("\n", idx);
+  return finLinea !== -1 ? texto.substring(finLinea + 1) : texto.substring(idx);
 }
 
-// Intenta separar el texto del OCR en varios ítems (cantidad + unidad + descripción),
-// para tablas con varias filas (como tu orden de requerimiento o guía de almacén).
-// Si no logra reconocer el patrón en ninguna línea, devuelve un arreglo vacío —
-// mejor no rellenar nada a adivinar basura del encabezado.
-function detectarFilasDesdeTexto(texto){
-  const lineas = String(texto || "").split("\n").map(l => l.trim()).filter(Boolean);
-  const regex = /^\S+\s+(\d+(?:[.,]\d+)?)\s+([A-Za-zÁÉÍÓÚÑñ.\-]{2,12})\s+(.+)$/;
-  const filas = [];
+// Intenta separar el texto (ya recortado) en varias filas de ítems.
+// columnas: nombres de campo en el orden esperado, ej. ['cantidad','unidad','descripcion','partida','observaciones']
+function detectarFilasDesdeTexto(texto, columnas){
+  const recortado = recortarDesdeEncabezadoTabla(texto);
+  const lineas = String(recortado || "").split("\n").map(l => l.replace(/\r/g, "")).filter(l => l.trim());
+  let filas = [];
+
+  // Intento 1: separado por tabulaciones (cuando el OCR reconoce la tabla como tabla real)
   lineas.forEach(linea => {
-    const m = linea.match(regex);
-    if(m) filas.push({ cantidad: m[1], unidad: m[2].toUpperCase(), descripcion: m[3].trim() });
+    if(!linea.includes("\t")) return;
+    let partes = linea.split("\t").map(p => p.trim());
+    if(partes.length >= columnas.length){
+      let inicio = partes.length - columnas.length; // toma las últimas N columnas (por si sobra el N° de ítem al inicio)
+      const fila = {};
+      columnas.forEach((c, i) => { fila[c] = partes[inicio + i] || ""; });
+      if(Object.values(fila).some(v => v)) filas.push(fila);
+    }
+  });
+  if(filas.length > 0) return filas;
+
+  // Intento 2: todo en una sola línea separado por espacios (menos confiable)
+  const regexEspacios = /^\S*\s*(\d+(?:[.,]\d+)?)\s+([A-Za-zÁÉÍÓÚÑñ.\-\/]{2,15})\s+(.{3,})$/;
+  lineas.forEach(linea => {
+    const m = linea.match(regexEspacios);
+    if(m){
+      const fila = {};
+      fila[columnas[0]] = m[1];
+      fila[columnas[1]] = m[2].toUpperCase();
+      fila[columnas[2]] = m[3].trim();
+      filas.push(fila);
+    }
   });
   return filas;
 }
 
 function renderRequerimientos(){
   const cont = document.getElementById("contenidoRequerimientos");
-  const filtradas = filtroEstadoReq ? DATA_REQ.filter(r => r.estado === filtroEstadoReq) : DATA_REQ;
-  const contar = (est) => DATA_REQ.filter(r => r.estado === est).length;
+  const contarItems = (est) => DATA_REQ.reduce((n, g) => n + g.items.filter(it => it.estado === est).length, 0);
+  const totalItems = DATA_REQ.reduce((n, g) => n + g.items.length, 0);
+
+  let filasHtml = "";
+  DATA_REQ.forEach(grupo => {
+    const itemsFiltrados = filtroEstadoReq ? grupo.items.filter(it => it.estado === filtroEstadoReq) : grupo.items;
+    if(itemsFiltrados.length === 0 && grupo.items.length > 0) return; // grupo sin nada que mostrar con este filtro
+
+    filasHtml += `<tr>
+      <td colspan="10" style="background:var(--paper-dim);padding:8px 12px;">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:'IBM Plex Mono',monospace;font-size:12px;">
+          <b>📦 Requerimiento — ${escapeHtml(grupo.fecha)}</b>
+          ${grupo.link
+            ? `<a href="${grupo.link}" target="_blank" rel="noopener">📄 Ver documento</a>`
+            : `<button type="button" onclick="adjuntarArchivoGrupoReq('${grupo.id}')" style="background:transparent;border:1.5px solid var(--ink-soft);border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--ink-soft);">📎 Adjuntar foto/PDF</button>`}
+          <button type="button" class="btn-secundario" onclick="agregarItemAGrupoReq('${grupo.id}')" style="padding:4px 10px;">+ Ítem</button>
+          <button type="button" onclick="eliminarGrupoReq('${grupo.id}')" style="background:transparent;border:1.5px solid var(--stamp-error);color:var(--stamp-error);border-radius:6px;padding:3px 8px;cursor:pointer;">✕ Quitar grupo</button>
+        </div>
+      </td>
+    </tr>`;
+    itemsFiltrados.forEach((item, i) => { filasHtml += filaItemReqHTML(grupo.id, item, i + 1); });
+  });
 
   cont.innerHTML = `
     <div class="chips" style="margin-bottom:14px;">
-      <div class="chip ${filtroEstadoReq===null?'on':''}" onclick="filtrarReq(null)">Todos (${DATA_REQ.length})</div>
-      <div class="chip ${filtroEstadoReq==='pendiente'?'on':''}" onclick="filtrarReq('pendiente')">Pendiente (${contar('pendiente')})</div>
-      <div class="chip ${filtroEstadoReq==='pedido'?'on':''}" onclick="filtrarReq('pedido')">Pedido realizado (${contar('pedido')})</div>
-      <div class="chip ${filtroEstadoReq==='entregado'?'on':''}" onclick="filtrarReq('entregado')">Entregado (${contar('entregado')})</div>
+      <div class="chip ${filtroEstadoReq===null?'on':''}" onclick="filtrarReq(null)">Todos (${totalItems})</div>
+      <div class="chip ${filtroEstadoReq==='pendiente'?'on':''}" onclick="filtrarReq('pendiente')">Pendiente (${contarItems('pendiente')})</div>
+      <div class="chip ${filtroEstadoReq==='pedido'?'on':''}" onclick="filtrarReq('pedido')">Pedido realizado (${contarItems('pedido')})</div>
+      <div class="chip ${filtroEstadoReq==='entregado'?'on':''}" onclick="filtrarReq('entregado')">Entregado (${contarItems('entregado')})</div>
     </div>
 
     <div class="grid-wrap">
@@ -1364,19 +1407,16 @@ function renderRequerimientos(){
           <th>DESCRIPCIÓN</th>
           <th style="width:150px;">PARTIDA A EJECUTAR</th>
           <th style="width:170px;">OBSERVACIONES</th>
-          <th style="width:44px;">📎</th>
           <th style="width:56px;">Pend.</th>
           <th style="width:56px;">Pedido</th>
           <th style="width:64px;">Entreg.</th>
           <th style="width:34px;"></th>
         </tr></thead>
-        <tbody id="cuerpoGridReq">
-          ${filtradas.map((r, i) => filaReqHTML(r, i + 1)).join("")}
-        </tbody>
+        <tbody id="cuerpoGridReq">${filasHtml}</tbody>
       </table>
     </div>
-    <button class="btn-secundario" style="margin-top:12px;" onclick="agregarFilaReqVacia()">+ Nuevo requerimiento</button>
-    <p style="font-size:11.5px;color:var(--ink-soft);margin-top:10px;">💾 Cada celda se guarda sola al tocar fuera de ella. Usa 📎 para adjuntar la foto/PDF de esa fila.</p>`;
+    <button class="btn-secundario" style="margin-top:12px;" onclick="agregarGrupoReqVacio()">+ Nuevo requerimiento</button>
+    <p style="font-size:11.5px;color:var(--ink-soft);margin-top:10px;">💾 Cada celda se guarda sola al tocar fuera de ella. Todos los ítems de una misma foto quedan agrupados juntos.</p>`;
 }
 
 function filtrarReq(estado){
@@ -1384,132 +1424,143 @@ function filtrarReq(estado){
   renderRequerimientos();
 }
 
-function filaReqHTML(r, numeroItem){
-  return `<tr data-id="${r.id}">
+function filaItemReqHTML(grupoId, item, numeroItem){
+  return `<tr data-grupo="${grupoId}" data-item="${item.id}">
     <td style="text-align:center;font-weight:700;font-family:'IBM Plex Mono',monospace;">${String(numeroItem).padStart(2,"0")}</td>
-    <td><input class="c-cantidad" value="${escapeAtributo(r.cantidad||"")}" onblur="autoguardarReq('${r.id}')"></td>
-    <td><input class="c-unidad" value="${escapeAtributo(r.unidad||"")}" onblur="autoguardarReq('${r.id}')"></td>
-    <td><input class="c-descripcion" value="${escapeAtributo(r.descripcion||"")}" onblur="autoguardarReq('${r.id}')"></td>
-    <td><input class="c-partida" value="${escapeAtributo(r.partida||"")}" onblur="autoguardarReq('${r.id}')"></td>
-    <td><input class="c-observaciones" value="${escapeAtributo(r.observaciones||"")}" onblur="autoguardarReq('${r.id}')"></td>
-    <td style="text-align:center;">
-      ${r.link
-        ? `<a href="${r.link}" target="_blank" rel="noopener" title="Ver archivo" style="font-size:16px;">📄</a>`
-        : `<button type="button" onclick="adjuntarArchivoReq('${r.id}')" title="Adjuntar foto/PDF" style="background:transparent;border:none;cursor:pointer;font-size:16px;">📎</button>`}
-    </td>
-    <td style="text-align:center;"><input type="checkbox" ${r.estado==='pendiente'?'checked':''} onchange="cambiarEstadoReq('${r.id}','pendiente')"></td>
-    <td style="text-align:center;"><input type="checkbox" ${r.estado==='pedido'?'checked':''} onchange="cambiarEstadoReq('${r.id}','pedido')"></td>
-    <td style="text-align:center;"><input type="checkbox" ${r.estado==='entregado'?'checked':''} onchange="cambiarEstadoReq('${r.id}','entregado')"></td>
-    <td><button class="btn-fila borrar" onclick="eliminarReq('${r.id}')" title="Quitar">✕</button></td>
+    <td><input class="c-cantidad" value="${escapeAtributo(item.cantidad||"")}" onblur="autoguardarItemReq('${grupoId}','${item.id}')"></td>
+    <td><input class="c-unidad" value="${escapeAtributo(item.unidad||"")}" onblur="autoguardarItemReq('${grupoId}','${item.id}')"></td>
+    <td><input class="c-descripcion" value="${escapeAtributo(item.descripcion||"")}" onblur="autoguardarItemReq('${grupoId}','${item.id}')"></td>
+    <td><input class="c-partida" value="${escapeAtributo(item.partida||"")}" onblur="autoguardarItemReq('${grupoId}','${item.id}')"></td>
+    <td><input class="c-observaciones" value="${escapeAtributo(item.observaciones||"")}" onblur="autoguardarItemReq('${grupoId}','${item.id}')"></td>
+    <td style="text-align:center;"><input type="checkbox" ${item.estado==='pendiente'?'checked':''} onchange="cambiarEstadoItemReq('${grupoId}','${item.id}','pendiente')"></td>
+    <td style="text-align:center;"><input type="checkbox" ${item.estado==='pedido'?'checked':''} onchange="cambiarEstadoItemReq('${grupoId}','${item.id}','pedido')"></td>
+    <td style="text-align:center;"><input type="checkbox" ${item.estado==='entregado'?'checked':''} onchange="cambiarEstadoItemReq('${grupoId}','${item.id}','entregado')"></td>
+    <td><button class="btn-fila borrar" onclick="eliminarItemReq('${grupoId}','${item.id}')" title="Quitar ítem">✕</button></td>
   </tr>`;
 }
 
-function agregarFilaReqVacia(){
+function agregarGrupoReqVacio(){
   const tempId = "nuevo_" + Date.now();
   DATA_REQ.push({
     id: tempId, _nueva: true,
     fecha: isoADDMMYYYY(new Date().toISOString().split("T")[0]),
-    cantidad: "", unidad: "", descripcion: "", partida: "", observaciones: "",
-    estado: "pendiente", area: "", link: ""
+    link: "",
+    items: [{ id: "item_" + Date.now(), cantidad: "", unidad: "", descripcion: "", partida: "", observaciones: "", estado: "pendiente", area: "" }]
   });
   renderRequerimientos();
   setTimeout(() => {
-    const tr = document.querySelector(`tr[data-id="${tempId}"]`);
+    const tr = document.querySelector(`tr[data-grupo="${tempId}"]`);
     if(tr) tr.querySelector(".c-cantidad").focus();
   }, 50);
 }
 
-async function autoguardarReq(id){
-  const tr = document.querySelector(`tr[data-id="${id}"]`);
-  const item = DATA_REQ.find(r => r.id === id);
-  if(!tr || !item) return;
+function agregarItemAGrupoReq(grupoId){
+  const grupo = DATA_REQ.find(g => g.id === grupoId);
+  if(!grupo) return;
+  grupo.items.push({ id: "item_" + Date.now(), cantidad: "", unidad: "", descripcion: "", partida: "", observaciones: "", estado: "pendiente", area: "" });
+  renderRequerimientos();
+}
 
-  const cantidad = tr.querySelector(".c-cantidad").value.trim();
-  const unidad = tr.querySelector(".c-unidad").value.trim();
-  const descripcion = tr.querySelector(".c-descripcion").value.trim();
-  const partida = tr.querySelector(".c-partida").value.trim();
-  const observaciones = tr.querySelector(".c-observaciones").value.trim();
-
-  if(!cantidad && !descripcion) return; // fila todavía vacía, nada que guardar
+// Guarda TODO el grupo (todos sus ítems juntos) — más simple y consistente que guardar uno por uno
+async function guardarGrupoCompletoReq(grupoId){
+  const grupo = DATA_REQ.find(g => g.id === grupoId);
+  if(!grupo) return false;
 
   const pin = await pedirPin();
-  if(!pin) return;
+  if(!pin) return false;
+
+  // Lee los valores actuales desde el DOM de cada fila de este grupo (por si el usuario los editó)
+  document.querySelectorAll(`tr[data-grupo="${grupoId}"]`).forEach(tr => {
+    const itemId = tr.dataset.item;
+    const item = grupo.items.find(it => it.id === itemId);
+    if(!item) return;
+    item.cantidad = tr.querySelector(".c-cantidad").value.trim();
+    item.unidad = tr.querySelector(".c-unidad").value.trim();
+    item.descripcion = tr.querySelector(".c-descripcion").value.trim();
+    item.partida = tr.querySelector(".c-partida").value.trim();
+    item.observaciones = tr.querySelector(".c-observaciones").value.trim();
+  });
+
+  try {
+    const esNuevo = grupo._nueva;
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ accion: "guardarGrupoRequerimiento", pin, id: esNuevo ? null : grupoId, fecha: grupo.fecha, items: grupo.items })
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+
+    grupo.items = data.items;
+    if(esNuevo){ grupo.id = data.id; grupo._nueva = false; }
+    return true;
+  } catch (err) {
+    alert("No se pudo guardar: " + err.message);
+    return false;
+  }
+}
+
+async function autoguardarItemReq(grupoId, itemId){
+  const grupo = DATA_REQ.find(g => g.id === grupoId);
+  const item = grupo ? grupo.items.find(it => it.id === itemId) : null;
+  const tr = document.querySelector(`tr[data-grupo="${grupoId}"][data-item="${itemId}"]`);
+  if(!grupo || !item || !tr) return;
+
+  const cantidad = tr.querySelector(".c-cantidad").value.trim();
+  const descripcion = tr.querySelector(".c-descripcion").value.trim();
+  if(!cantidad && !descripcion) return; // fila todavía vacía
 
   tr.style.transition = "background-color .3s";
   tr.style.backgroundColor = "#EAF3FD";
 
-  try {
-    const esNueva = item._nueva;
-    const res = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({
-        accion: "guardarRequerimiento", pin, id: esNueva ? null : id,
-        fecha: item.fecha, cantidad, unidad, descripcion, partida, observaciones,
-        estado: item.estado, area: item.area
-      })
-    });
-    const data = await res.json();
-    if(!data.ok) throw new Error(data.error || "Error desconocido");
-
-    item.cantidad = cantidad; item.unidad = unidad; item.descripcion = descripcion;
-    item.partida = partida; item.observaciones = observaciones;
-
+  const ok = await guardarGrupoCompletoReq(grupoId);
+  if(ok){
     tr.style.backgroundColor = "#D6EAFB";
     setTimeout(() => { tr.style.backgroundColor = ""; }, 900);
-
-    if(esNueva){
-      item.id = data.id; item._nueva = false;
-      renderRequerimientos(); // solo una vez, para que la fila quede con su id real
-    }
-  } catch (err) {
+    renderRequerimientos(); // por si el grupo era nuevo y ahora ya tiene id real
+  } else {
     tr.style.backgroundColor = "#FBDCDC";
-    alert("No se pudo guardar: " + err.message);
   }
 }
 
-async function cambiarEstadoReq(id, nuevoEstado){
-  const item = DATA_REQ.find(r => r.id === id);
-  if(!item) return;
+async function cambiarEstadoItemReq(grupoId, itemId, nuevoEstado){
+  const grupo = DATA_REQ.find(g => g.id === grupoId);
+  const item = grupo ? grupo.items.find(it => it.id === itemId) : null;
+  if(!grupo || !item) return;
 
-  let area = item.area || "";
   if(nuevoEstado === "entregado"){
-    const respuesta = prompt("¿A qué área se entregó?", area);
+    const respuesta = prompt("¿A qué área se entregó?", item.area || "");
     if(!respuesta){ renderRequerimientos(); return; }
-    area = respuesta;
+    item.area = respuesta;
   }
+  item.estado = nuevoEstado;
 
-  const pin = await pedirPin();
-  if(!pin){ renderRequerimientos(); return; }
-
-  try {
-    const res = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({
-        accion: "guardarRequerimiento", pin, id,
-        fecha: item.fecha, cantidad: item.cantidad, unidad: item.unidad,
-        descripcion: item.descripcion, partida: item.partida, observaciones: item.observaciones,
-        estado: nuevoEstado, area
-      })
-    });
-    const data = await res.json();
-    if(!data.ok) throw new Error(data.error || "Error desconocido");
-    item.estado = nuevoEstado;
-    item.area = area;
-    renderRequerimientos();
-  } catch (err) {
-    alert("No se pudo actualizar: " + err.message);
-    pinSesion = "";
-    renderRequerimientos();
-  }
+  const ok = await guardarGrupoCompletoReq(grupoId);
+  renderRequerimientos();
+  if(!ok) pinSesion = "";
 }
 
-async function eliminarReq(id){
-  const item = DATA_REQ.find(r => r.id === id);
-  if(item && item._nueva){ DATA_REQ = DATA_REQ.filter(r => r.id !== id); renderRequerimientos(); return; }
+async function eliminarItemReq(grupoId, itemId){
+  const grupo = DATA_REQ.find(g => g.id === grupoId);
+  if(!grupo) return;
 
-  if(!confirm("¿Quitar este requerimiento?\n\nEsto borra el registro y manda la foto/PDF a la papelera de Drive.")) return;
+  if(grupo.items.length <= 1){
+    eliminarGrupoReq(grupoId);
+    return;
+  }
+  if(!confirm("¿Quitar este ítem del requerimiento?")) return;
+
+  grupo.items = grupo.items.filter(it => it.id !== itemId);
+  const ok = await guardarGrupoCompletoReq(grupoId);
+  if(!ok) pinSesion = "";
+  renderRequerimientos();
+}
+
+async function eliminarGrupoReq(grupoId){
+  const grupo = DATA_REQ.find(g => g.id === grupoId);
+  if(grupo && grupo._nueva){ DATA_REQ = DATA_REQ.filter(g => g.id !== grupoId); renderRequerimientos(); return; }
+
+  if(!confirm("¿Quitar TODO este requerimiento (todos sus ítems)?\n\nEsto también manda la foto/PDF a la papelera de Drive.")) return;
   const pin = await pedirPin();
   if(!pin) return;
 
@@ -1517,11 +1568,11 @@ async function eliminarReq(id){
     const res = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ accion: "eliminarRequerimiento", pin, id })
+      body: JSON.stringify({ accion: "eliminarGrupoRequerimiento", pin, id: grupoId })
     });
     const data = await res.json();
     if(!data.ok) throw new Error(data.error || "Error desconocido");
-    DATA_REQ = DATA_REQ.filter(r => r.id !== id);
+    DATA_REQ = DATA_REQ.filter(g => g.id !== grupoId);
     renderRequerimientos();
   } catch (err) {
     alert("No se pudo eliminar: " + err.message);
@@ -1529,23 +1580,20 @@ async function eliminarReq(id){
   }
 }
 
-function adjuntarArchivoReq(id){
+function adjuntarArchivoGrupoReq(grupoId){
   const input = document.createElement("input");
   input.type = "file";
   input.accept = "image/*,application/pdf";
-  input.onchange = () => { if(input.files[0]) subirArchivoParaFilaReq(id, input.files[0]); };
+  input.onchange = () => { if(input.files[0]) subirArchivoParaGrupoReq(grupoId, input.files[0]); };
   input.click();
 }
 
-async function subirArchivoParaFilaReq(id, file){
-  const item = DATA_REQ.find(r => r.id === id);
-  const tr = document.querySelector(`tr[data-id="${id}"]`);
-  if(!item || !tr) return;
+async function subirArchivoParaGrupoReq(grupoId, file){
+  const grupo = DATA_REQ.find(g => g.id === grupoId);
+  if(!grupo) return;
 
   const pin = await pedirPin();
   if(!pin) return;
-
-  tr.style.opacity = "0.6";
 
   try {
     const base64 = await archivoABase64(file);
@@ -1561,68 +1609,43 @@ async function subirArchivoParaFilaReq(id, file){
       if(dataOCR.ok) texto = dataOCR.texto || "";
     } catch (e) { /* seguimos aunque el OCR falle */ }
 
-    const filasDetectadas = detectarFilasDesdeTexto(texto);
-    const primera = filasDetectadas[0];
+    const filasDetectadas = detectarFilasDesdeTexto(texto, ["cantidad", "unidad", "descripcion", "partida", "observaciones"]);
 
-    const esNueva = item._nueva;
-    const body = {
-      accion: "guardarRequerimiento", pin, id: esNueva ? null : id,
-      fecha: item.fecha,
-      cantidad: primera ? primera.cantidad : tr.querySelector(".c-cantidad").value.trim(),
-      unidad: primera ? primera.unidad : tr.querySelector(".c-unidad").value.trim(),
-      descripcion: primera ? primera.descripcion : tr.querySelector(".c-descripcion").value.trim(),
-      partida: tr.querySelector(".c-partida").value.trim(),
-      observaciones: tr.querySelector(".c-observaciones").value.trim(),
-      estado: item.estado, area: item.area,
-      archivoBase64: base64, mimeType: file.type || "application/pdf"
-    };
+    if(filasDetectadas.length > 0){
+      grupo.items = filasDetectadas.map(f => ({
+        id: "item_" + Date.now() + "_" + Math.random().toString(36).slice(2),
+        cantidad: f.cantidad || "", unidad: f.unidad || "", descripcion: f.descripcion || "",
+        partida: f.partida || "", observaciones: f.observaciones || "", estado: "pendiente", area: ""
+      }));
+    }
 
+    const esNuevo = grupo._nueva;
     const res = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(body)
+      body: JSON.stringify({ accion: "guardarGrupoRequerimiento", pin, id: esNuevo ? null : grupoId, fecha: grupo.fecha, items: grupo.items, archivoBase64: base64, mimeType: file.type || "application/pdf" })
     });
     const data = await res.json();
     if(!data.ok) throw new Error(data.error || "Error desconocido");
 
-    item.link = data.link;
-    item.cantidad = body.cantidad; item.unidad = body.unidad; item.descripcion = body.descripcion;
-    item.partida = body.partida; item.observaciones = body.observaciones;
-    if(esNueva){ item.id = data.id; item._nueva = false; }
+    grupo.link = data.link;
+    grupo.items = data.items;
+    if(esNuevo){ grupo.id = data.id; grupo._nueva = false; }
 
-    // Si el documento tenía más de un ítem, creamos una fila por cada uno extra,
-    // reutilizando el mismo archivo ya subido (sin volver a subirlo).
-    if(filasDetectadas.length > 1){
-      for(let i = 1; i < filasDetectadas.length; i++){
-        const f = filasDetectadas[i];
-        const resX = await fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({
-            accion: "guardarRequerimiento", pin, id: null,
-            fecha: item.fecha, cantidad: f.cantidad, unidad: f.unidad, descripcion: f.descripcion,
-            partida: "", observaciones: "", estado: "pendiente", area: "", link: data.link
-          })
-        });
-        const dataX = await resX.json();
-        if(dataX.ok){
-          DATA_REQ.push({ id: dataX.id, fecha: item.fecha, cantidad: f.cantidad, unidad: f.unidad, descripcion: f.descripcion, partida: "", observaciones: "", estado: "pendiente", area: "", link: data.link });
-        }
-      }
-      alert(`Se detectaron ${filasDetectadas.length} ítems en el documento — se crearon ${filasDetectadas.length} filas. Revísalas y corrige lo que haga falta.`);
-    } else if(filasDetectadas.length === 0 && texto){
+    if(filasDetectadas.length === 0 && texto){
       alert("No pude separar el detalle automáticamente. Esto es lo que alcanzó a leer el documento — cópialo a mano donde corresponda:\n\n" + texto.substring(0, 500));
+    } else if(filasDetectadas.length > 0){
+      alert(`Se detectaron ${filasDetectadas.length} ítems en el documento — revísalos y corrige lo que haga falta.`);
     }
 
     renderRequerimientos();
   } catch (err) {
-    tr.style.opacity = "1";
     alert("No se pudo subir el archivo: " + err.message);
   }
 }
 
 // ===================== MÓDULO: ALMACÉN =====================
-let DATA_ALM = [];
+let DATA_ALM = []; // array de GRUPOS (guías/facturas), cada uno con .items[]
 let filtroTipoAlm = null;
 
 async function cargarAlmacen(){
@@ -1645,36 +1668,53 @@ async function cargarAlmacen(){
 
 function renderAlmacen(){
   const cont = document.getElementById("contenidoAlmacen");
-  const filtradas = filtroTipoAlm ? DATA_ALM.filter(a => a.tipo === filtroTipoAlm) : DATA_ALM;
-  const contar = (t) => DATA_ALM.filter(a => a.tipo === t).length;
+  const gruposFiltrados = filtroTipoAlm ? DATA_ALM.filter(g => g.tipo === filtroTipoAlm) : DATA_ALM;
+  const contarGrupos = (t) => DATA_ALM.filter(g => g.tipo === t).length;
+
+  let filasHtml = "";
+  gruposFiltrados.forEach(grupo => {
+    const color = grupo.tipo === "entrada" ? "var(--cat-supervision)" : "var(--stamp-orange)";
+    filasHtml += `<tr>
+      <td colspan="8" style="background:var(--paper-dim);padding:8px 12px;">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:'IBM Plex Mono',monospace;font-size:12px;">
+          <b style="color:${color};">${grupo.tipo === "entrada" ? "📥 ENTRADA" : "📤 SALIDA"}</b>
+          <span>${escapeHtml(grupo.fecha)}</span>
+          ${grupo.link
+            ? `<a href="${grupo.link}" target="_blank" rel="noopener">📄 Ver documento</a>`
+            : `<button type="button" onclick="adjuntarArchivoGrupoAlm('${grupo.id}')" style="background:transparent;border:1.5px solid var(--ink-soft);border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--ink-soft);">📎 Adjuntar foto/PDF</button>`}
+          <button type="button" class="btn-secundario" onclick="agregarItemAGrupoAlm('${grupo.id}')" style="padding:4px 10px;">+ Ítem</button>
+          <button type="button" onclick="cambiarTipoGrupoAlm('${grupo.id}')" style="background:transparent;border:1.5px solid ${color};color:${color};border-radius:6px;padding:3px 8px;cursor:pointer;">🔁 Cambiar a ${grupo.tipo==='entrada'?'Salida':'Entrada'}</button>
+          <button type="button" onclick="eliminarGrupoAlm('${grupo.id}')" style="background:transparent;border:1.5px solid var(--stamp-error);color:var(--stamp-error);border-radius:6px;padding:3px 8px;cursor:pointer;">✕ Quitar grupo</button>
+        </div>
+      </td>
+    </tr>`;
+    grupo.items.forEach((item, i) => { filasHtml += filaItemAlmHTML(grupo.id, item, i + 1); });
+  });
 
   cont.innerHTML = `
     <div class="chips" style="margin-bottom:14px;">
       <div class="chip ${filtroTipoAlm===null?'on':''}" onclick="filtrarAlm(null)">Todos (${DATA_ALM.length})</div>
-      <div class="chip ${filtroTipoAlm==='entrada'?'on':''}" onclick="filtrarAlm('entrada')">Entradas (${contar('entrada')})</div>
-      <div class="chip ${filtroTipoAlm==='salida'?'on':''}" onclick="filtrarAlm('salida')">Salidas (${contar('salida')})</div>
+      <div class="chip ${filtroTipoAlm==='entrada'?'on':''}" onclick="filtrarAlm('entrada')">Entradas (${contarGrupos('entrada')})</div>
+      <div class="chip ${filtroTipoAlm==='salida'?'on':''}" onclick="filtrarAlm('salida')">Salidas (${contarGrupos('salida')})</div>
     </div>
 
     <div class="grid-wrap">
       <table class="grid">
         <thead><tr>
           <th style="width:44px;">ITEM</th>
+          <th style="width:80px;">CÓDIGO</th>
           <th style="width:90px;">CANTIDAD</th>
           <th style="width:70px;">UND</th>
           <th>DESCRIPCIÓN</th>
-          <th style="width:190px;">OBSERVACIONES</th>
-          <th style="width:44px;">📎</th>
-          <th style="width:64px;">Entrada</th>
-          <th style="width:56px;">Salida</th>
+          <th style="width:80px;">PESO</th>
+          <th style="width:150px;">OBSERVACIONES</th>
           <th style="width:34px;"></th>
         </tr></thead>
-        <tbody id="cuerpoGridAlm">
-          ${filtradas.map((a, i) => filaAlmHTML(a, i + 1)).join("")}
-        </tbody>
+        <tbody id="cuerpoGridAlm">${filasHtml}</tbody>
       </table>
     </div>
-    <button class="btn-secundario" style="margin-top:12px;" onclick="agregarFilaAlmVacia()">+ Nuevo movimiento</button>
-    <p style="font-size:11.5px;color:var(--ink-soft);margin-top:10px;">💾 Cada celda se guarda sola al tocar fuera de ella. Usa 📎 para adjuntar la foto/PDF de esa fila.</p>`;
+    <button class="btn-secundario" style="margin-top:12px;" onclick="agregarGrupoAlmVacio()">+ Nuevo movimiento</button>
+    <p style="font-size:11.5px;color:var(--ink-soft);margin-top:10px;">💾 Cada celda se guarda sola al tocar fuera de ella. Todos los ítems de una misma guía quedan agrupados juntos.</p>`;
 }
 
 function filtrarAlm(tipo){
@@ -1682,118 +1722,132 @@ function filtrarAlm(tipo){
   renderAlmacen();
 }
 
-function filaAlmHTML(a, numeroItem){
-  return `<tr data-id="${a.id}">
+function filaItemAlmHTML(grupoId, item, numeroItem){
+  return `<tr data-grupo="${grupoId}" data-item="${item.id}">
     <td style="text-align:center;font-weight:700;font-family:'IBM Plex Mono',monospace;">${String(numeroItem).padStart(2,"0")}</td>
-    <td><input class="c-cantidad" value="${escapeAtributo(a.cantidad||"")}" onblur="autoguardarAlm('${a.id}')"></td>
-    <td><input class="c-unidad" value="${escapeAtributo(a.unidad||"")}" onblur="autoguardarAlm('${a.id}')"></td>
-    <td><input class="c-descripcion" value="${escapeAtributo(a.descripcion||"")}" onblur="autoguardarAlm('${a.id}')"></td>
-    <td><input class="c-observaciones" value="${escapeAtributo(a.observaciones||"")}" onblur="autoguardarAlm('${a.id}')"></td>
-    <td style="text-align:center;">
-      ${a.link
-        ? `<a href="${a.link}" target="_blank" rel="noopener" title="Ver archivo" style="font-size:16px;">📄</a>`
-        : `<button type="button" onclick="adjuntarArchivoAlm('${a.id}')" title="Adjuntar foto/PDF" style="background:transparent;border:none;cursor:pointer;font-size:16px;">📎</button>`}
-    </td>
-    <td style="text-align:center;"><input type="checkbox" ${a.tipo==='entrada'?'checked':''} onchange="cambiarTipoAlm('${a.id}','entrada')"></td>
-    <td style="text-align:center;"><input type="checkbox" ${a.tipo==='salida'?'checked':''} onchange="cambiarTipoAlm('${a.id}','salida')"></td>
-    <td><button class="btn-fila borrar" onclick="eliminarAlm('${a.id}')" title="Quitar">✕</button></td>
+    <td><input class="c-codigo" value="${escapeAtributo(item.codigo||"")}" onblur="autoguardarItemAlm('${grupoId}','${item.id}')"></td>
+    <td><input class="c-cantidad" value="${escapeAtributo(item.cantidad||"")}" onblur="autoguardarItemAlm('${grupoId}','${item.id}')"></td>
+    <td><input class="c-unidad" value="${escapeAtributo(item.unidad||"")}" onblur="autoguardarItemAlm('${grupoId}','${item.id}')"></td>
+    <td><input class="c-descripcion" value="${escapeAtributo(item.descripcion||"")}" onblur="autoguardarItemAlm('${grupoId}','${item.id}')"></td>
+    <td><input class="c-peso" value="${escapeAtributo(item.peso||"")}" onblur="autoguardarItemAlm('${grupoId}','${item.id}')"></td>
+    <td><input class="c-observaciones" value="${escapeAtributo(item.observaciones||"")}" onblur="autoguardarItemAlm('${grupoId}','${item.id}')"></td>
+    <td><button class="btn-fila borrar" onclick="eliminarItemAlm('${grupoId}','${item.id}')" title="Quitar ítem">✕</button></td>
   </tr>`;
 }
 
-function agregarFilaAlmVacia(){
+function agregarGrupoAlmVacio(){
   const tempId = "nuevo_" + Date.now();
   DATA_ALM.push({
     id: tempId, _nueva: true,
     fecha: isoADDMMYYYY(new Date().toISOString().split("T")[0]),
-    cantidad: "", unidad: "", descripcion: "", observaciones: "",
-    tipo: "entrada", link: ""
+    tipo: "entrada", link: "",
+    items: [{ id: "item_" + Date.now(), codigo: "", cantidad: "", unidad: "", descripcion: "", peso: "", observaciones: "" }]
   });
   renderAlmacen();
   setTimeout(() => {
-    const tr = document.querySelector(`tr[data-id="${tempId}"]`);
+    const tr = document.querySelector(`tr[data-grupo="${tempId}"]`);
     if(tr) tr.querySelector(".c-cantidad").focus();
   }, 50);
 }
 
-async function autoguardarAlm(id){
-  const tr = document.querySelector(`tr[data-id="${id}"]`);
-  const item = DATA_ALM.find(a => a.id === id);
-  if(!tr || !item) return;
+function agregarItemAGrupoAlm(grupoId){
+  const grupo = DATA_ALM.find(g => g.id === grupoId);
+  if(!grupo) return;
+  grupo.items.push({ id: "item_" + Date.now(), codigo: "", cantidad: "", unidad: "", descripcion: "", peso: "", observaciones: "" });
+  renderAlmacen();
+}
 
-  const cantidad = tr.querySelector(".c-cantidad").value.trim();
-  const unidad = tr.querySelector(".c-unidad").value.trim();
-  const descripcion = tr.querySelector(".c-descripcion").value.trim();
-  const observaciones = tr.querySelector(".c-observaciones").value.trim();
-
-  if(!cantidad && !descripcion) return;
+async function guardarGrupoCompletoAlm(grupoId){
+  const grupo = DATA_ALM.find(g => g.id === grupoId);
+  if(!grupo) return false;
 
   const pin = await pedirPin();
-  if(!pin) return;
+  if(!pin) return false;
+
+  document.querySelectorAll(`tr[data-grupo="${grupoId}"]`).forEach(tr => {
+    const itemId = tr.dataset.item;
+    const item = grupo.items.find(it => it.id === itemId);
+    if(!item) return;
+    item.codigo = tr.querySelector(".c-codigo").value.trim();
+    item.cantidad = tr.querySelector(".c-cantidad").value.trim();
+    item.unidad = tr.querySelector(".c-unidad").value.trim();
+    item.descripcion = tr.querySelector(".c-descripcion").value.trim();
+    item.peso = tr.querySelector(".c-peso").value.trim();
+    item.observaciones = tr.querySelector(".c-observaciones").value.trim();
+  });
+
+  try {
+    const esNuevo = grupo._nueva;
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ accion: "guardarGrupoAlmacen", pin, id: esNuevo ? null : grupoId, fecha: grupo.fecha, tipo: grupo.tipo, items: grupo.items })
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+
+    grupo.items = data.items;
+    if(esNuevo){ grupo.id = data.id; grupo._nueva = false; }
+    return true;
+  } catch (err) {
+    alert("No se pudo guardar: " + err.message);
+    return false;
+  }
+}
+
+async function autoguardarItemAlm(grupoId, itemId){
+  const grupo = DATA_ALM.find(g => g.id === grupoId);
+  const item = grupo ? grupo.items.find(it => it.id === itemId) : null;
+  const tr = document.querySelector(`tr[data-grupo="${grupoId}"][data-item="${itemId}"]`);
+  if(!grupo || !item || !tr) return;
+
+  const cantidad = tr.querySelector(".c-cantidad").value.trim();
+  const descripcion = tr.querySelector(".c-descripcion").value.trim();
+  if(!cantidad && !descripcion) return;
 
   tr.style.transition = "background-color .3s";
   tr.style.backgroundColor = "#EAF3FD";
 
-  try {
-    const esNueva = item._nueva;
-    const res = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({
-        accion: "guardarAlmacen", pin, id: esNueva ? null : id,
-        fecha: item.fecha, tipo: item.tipo, cantidad, unidad, descripcion, observaciones
-      })
-    });
-    const data = await res.json();
-    if(!data.ok) throw new Error(data.error || "Error desconocido");
-
-    item.cantidad = cantidad; item.unidad = unidad; item.descripcion = descripcion; item.observaciones = observaciones;
-
+  const ok = await guardarGrupoCompletoAlm(grupoId);
+  if(ok){
     tr.style.backgroundColor = "#D6EAFB";
     setTimeout(() => { tr.style.backgroundColor = ""; }, 900);
-
-    if(esNueva){
-      item.id = data.id; item._nueva = false;
-      renderAlmacen();
-    }
-  } catch (err) {
+    renderAlmacen();
+  } else {
     tr.style.backgroundColor = "#FBDCDC";
-    alert("No se pudo guardar: " + err.message);
   }
 }
 
-async function cambiarTipoAlm(id, nuevoTipo){
-  const item = DATA_ALM.find(a => a.id === id);
-  if(!item) return;
-
-  const pin = await pedirPin();
-  if(!pin){ renderAlmacen(); return; }
-
-  try {
-    const res = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({
-        accion: "guardarAlmacen", pin, id,
-        fecha: item.fecha, tipo: nuevoTipo, cantidad: item.cantidad, unidad: item.unidad,
-        descripcion: item.descripcion, observaciones: item.observaciones
-      })
-    });
-    const data = await res.json();
-    if(!data.ok) throw new Error(data.error || "Error desconocido");
-    item.tipo = nuevoTipo;
-    renderAlmacen();
-  } catch (err) {
-    alert("No se pudo actualizar: " + err.message);
-    pinSesion = "";
-    renderAlmacen();
-  }
+async function cambiarTipoGrupoAlm(grupoId){
+  const grupo = DATA_ALM.find(g => g.id === grupoId);
+  if(!grupo) return;
+  grupo.tipo = grupo.tipo === "entrada" ? "salida" : "entrada";
+  const ok = await guardarGrupoCompletoAlm(grupoId);
+  if(!ok) pinSesion = "";
+  renderAlmacen();
 }
 
-async function eliminarAlm(id){
-  const item = DATA_ALM.find(a => a.id === id);
-  if(item && item._nueva){ DATA_ALM = DATA_ALM.filter(a => a.id !== id); renderAlmacen(); return; }
+async function eliminarItemAlm(grupoId, itemId){
+  const grupo = DATA_ALM.find(g => g.id === grupoId);
+  if(!grupo) return;
 
-  if(!confirm("¿Quitar este movimiento?\n\nEsto borra el registro y manda la foto/PDF a la papelera de Drive.")) return;
+  if(grupo.items.length <= 1){
+    eliminarGrupoAlm(grupoId);
+    return;
+  }
+  if(!confirm("¿Quitar este ítem del movimiento?")) return;
+
+  grupo.items = grupo.items.filter(it => it.id !== itemId);
+  const ok = await guardarGrupoCompletoAlm(grupoId);
+  if(!ok) pinSesion = "";
+  renderAlmacen();
+}
+
+async function eliminarGrupoAlm(grupoId){
+  const grupo = DATA_ALM.find(g => g.id === grupoId);
+  if(grupo && grupo._nueva){ DATA_ALM = DATA_ALM.filter(g => g.id !== grupoId); renderAlmacen(); return; }
+
+  if(!confirm("¿Quitar TODO este movimiento (todos sus ítems)?\n\nEsto también manda la foto/PDF a la papelera de Drive.")) return;
   const pin = await pedirPin();
   if(!pin) return;
 
@@ -1801,11 +1855,11 @@ async function eliminarAlm(id){
     const res = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ accion: "eliminarAlmacen", pin, id })
+      body: JSON.stringify({ accion: "eliminarGrupoAlmacen", pin, id: grupoId })
     });
     const data = await res.json();
     if(!data.ok) throw new Error(data.error || "Error desconocido");
-    DATA_ALM = DATA_ALM.filter(a => a.id !== id);
+    DATA_ALM = DATA_ALM.filter(g => g.id !== grupoId);
     renderAlmacen();
   } catch (err) {
     alert("No se pudo eliminar: " + err.message);
@@ -1813,23 +1867,20 @@ async function eliminarAlm(id){
   }
 }
 
-function adjuntarArchivoAlm(id){
+function adjuntarArchivoGrupoAlm(grupoId){
   const input = document.createElement("input");
   input.type = "file";
   input.accept = "image/*,application/pdf";
-  input.onchange = () => { if(input.files[0]) subirArchivoParaFilaAlm(id, input.files[0]); };
+  input.onchange = () => { if(input.files[0]) subirArchivoParaGrupoAlm(grupoId, input.files[0]); };
   input.click();
 }
 
-async function subirArchivoParaFilaAlm(id, file){
-  const item = DATA_ALM.find(a => a.id === id);
-  const tr = document.querySelector(`tr[data-id="${id}"]`);
-  if(!item || !tr) return;
+async function subirArchivoParaGrupoAlm(grupoId, file){
+  const grupo = DATA_ALM.find(g => g.id === grupoId);
+  if(!grupo) return;
 
   const pin = await pedirPin();
   if(!pin) return;
-
-  tr.style.opacity = "0.6";
 
   try {
     const base64 = await archivoABase64(file);
@@ -1845,58 +1896,37 @@ async function subirArchivoParaFilaAlm(id, file){
       if(dataOCR.ok) texto = dataOCR.texto || "";
     } catch (e) { /* seguimos aunque el OCR falle */ }
 
-    const filasDetectadas = detectarFilasDesdeTexto(texto);
-    const primera = filasDetectadas[0];
+    const filasDetectadas = detectarFilasDesdeTexto(texto, ["codigo", "cantidad", "unidad", "descripcion", "peso"]);
 
-    const esNueva = item._nueva;
-    const body = {
-      accion: "guardarAlmacen", pin, id: esNueva ? null : id,
-      fecha: item.fecha, tipo: item.tipo,
-      cantidad: primera ? primera.cantidad : tr.querySelector(".c-cantidad").value.trim(),
-      unidad: primera ? primera.unidad : tr.querySelector(".c-unidad").value.trim(),
-      descripcion: primera ? primera.descripcion : tr.querySelector(".c-descripcion").value.trim(),
-      observaciones: tr.querySelector(".c-observaciones").value.trim(),
-      archivoBase64: base64, mimeType: file.type || "application/pdf"
-    };
+    if(filasDetectadas.length > 0){
+      grupo.items = filasDetectadas.map(f => ({
+        id: "item_" + Date.now() + "_" + Math.random().toString(36).slice(2),
+        codigo: f.codigo || "", cantidad: f.cantidad || "", unidad: f.unidad || "",
+        descripcion: f.descripcion || "", peso: f.peso || "", observaciones: ""
+      }));
+    }
 
+    const esNuevo = grupo._nueva;
     const res = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(body)
+      body: JSON.stringify({ accion: "guardarGrupoAlmacen", pin, id: esNuevo ? null : grupoId, fecha: grupo.fecha, tipo: grupo.tipo, items: grupo.items, archivoBase64: base64, mimeType: file.type || "application/pdf" })
     });
     const data = await res.json();
     if(!data.ok) throw new Error(data.error || "Error desconocido");
 
-    item.link = data.link;
-    item.cantidad = body.cantidad; item.unidad = body.unidad;
-    item.descripcion = body.descripcion; item.observaciones = body.observaciones;
-    if(esNueva){ item.id = data.id; item._nueva = false; }
+    grupo.link = data.link;
+    grupo.items = data.items;
+    if(esNuevo){ grupo.id = data.id; grupo._nueva = false; }
 
-    if(filasDetectadas.length > 1){
-      for(let i = 1; i < filasDetectadas.length; i++){
-        const f = filasDetectadas[i];
-        const resX = await fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({
-            accion: "guardarAlmacen", pin, id: null,
-            fecha: item.fecha, tipo: item.tipo, cantidad: f.cantidad, unidad: f.unidad,
-            descripcion: f.descripcion, observaciones: "", link: data.link
-          })
-        });
-        const dataX = await resX.json();
-        if(dataX.ok){
-          DATA_ALM.push({ id: dataX.id, fecha: item.fecha, tipo: item.tipo, cantidad: f.cantidad, unidad: f.unidad, descripcion: f.descripcion, observaciones: "", link: data.link });
-        }
-      }
-      alert(`Se detectaron ${filasDetectadas.length} ítems en el documento — se crearon ${filasDetectadas.length} filas. Revísalas y corrige lo que haga falta.`);
-    } else if(filasDetectadas.length === 0 && texto){
+    if(filasDetectadas.length === 0 && texto){
       alert("No pude separar el detalle automáticamente. Esto es lo que alcanzó a leer el documento — cópialo a mano donde corresponda:\n\n" + texto.substring(0, 500));
+    } else if(filasDetectadas.length > 0){
+      alert(`Se detectaron ${filasDetectadas.length} ítems en el documento — revísalos y corrige lo que haga falta.`);
     }
 
     renderAlmacen();
   } catch (err) {
-    tr.style.opacity = "1";
     alert("No se pudo subir el archivo: " + err.message);
   }
 }
