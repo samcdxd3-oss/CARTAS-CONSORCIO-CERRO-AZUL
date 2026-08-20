@@ -1610,6 +1610,7 @@ async function subirArchivoParaGrupoReq(grupoId, file){
     const base64 = await archivoABase64(file);
 
     let texto = "";
+    let errorOCR = "";
     try {
       const resOCR = await fetch(API_URL, {
         method: "POST",
@@ -1618,7 +1619,8 @@ async function subirArchivoParaGrupoReq(grupoId, file){
       });
       const dataOCR = await resOCR.json();
       if(dataOCR.ok) texto = dataOCR.texto || "";
-    } catch (e) { /* seguimos aunque el OCR falle */ }
+      else errorOCR = dataOCR.error || "Error desconocido leyendo el documento.";
+    } catch (e) { errorOCR = "Error de conexión al leer el documento: " + e.message; }
 
     const filasDetectadas = detectarFilasDesdeTexto(texto, ["cantidad", "unidad", "descripcion", "partida", "observaciones"]);
 
@@ -1628,6 +1630,12 @@ async function subirArchivoParaGrupoReq(grupoId, file){
         cantidad: f.cantidad || "", unidad: f.unidad || "", descripcion: f.descripcion || "",
         partida: f.partida || "", observaciones: f.observaciones || "", estado: "pendiente", area: ""
       }));
+    } else if(texto){
+      // No se pudo separar en columnas — dejamos el texto leído (ya recortado del encabezado)
+      // directamente en la Descripción del primer ítem del grupo, visible ahí mismo.
+      const textoRecortado = recortarDesdeEncabezadoTabla(texto).trim() || texto.trim();
+      if(grupo.items.length === 0) grupo.items.push({ id: "item_" + Date.now(), cantidad: "", unidad: "", descripcion: "", partida: "", observaciones: "", estado: "pendiente", area: "" });
+      if(!grupo.items[0].descripcion) grupo.items[0].descripcion = textoRecortado.substring(0, 800);
     }
 
     const esNuevo = grupo._nueva;
@@ -1643,8 +1651,10 @@ async function subirArchivoParaGrupoReq(grupoId, file){
     grupo.items = data.items;
     if(esNuevo){ grupo.id = data.id; grupo._nueva = false; }
 
-    if(filasDetectadas.length === 0 && texto){
-      alert("No pude separar el detalle automáticamente. Esto es lo que alcanzó a leer el documento — cópialo a mano donde corresponda:\n\n" + texto.substring(0, 500));
+    if(errorOCR){
+      alert("⚠️ No se pudo leer el documento con OCR:\n\n" + errorOCR + "\n\nEl archivo sí quedó adjuntado — completa las celdas a mano.");
+    } else if(filasDetectadas.length === 0 && texto){
+      alert("No pude separar el detalle en columnas — dejé el texto leído completo en la Descripción del primer ítem, para que lo repartas a mano entre las celdas que corresponda.");
     } else if(filasDetectadas.length > 0){
       alert(`Se detectaron ${filasDetectadas.length} ítems en el documento — revísalos y corrige lo que haga falta.`);
     }
@@ -1897,6 +1907,7 @@ async function subirArchivoParaGrupoAlm(grupoId, file){
     const base64 = await archivoABase64(file);
 
     let texto = "";
+    let errorOCR = "";
     try {
       const resOCR = await fetch(API_URL, {
         method: "POST",
@@ -1905,7 +1916,8 @@ async function subirArchivoParaGrupoAlm(grupoId, file){
       });
       const dataOCR = await resOCR.json();
       if(dataOCR.ok) texto = dataOCR.texto || "";
-    } catch (e) { /* seguimos aunque el OCR falle */ }
+      else errorOCR = dataOCR.error || "Error desconocido leyendo el documento.";
+    } catch (e) { errorOCR = "Error de conexión al leer el documento: " + e.message; }
 
     const filasDetectadas = detectarFilasDesdeTexto(texto, ["codigo", "cantidad", "unidad", "descripcion", "peso"]);
 
@@ -1915,6 +1927,10 @@ async function subirArchivoParaGrupoAlm(grupoId, file){
         codigo: f.codigo || "", cantidad: f.cantidad || "", unidad: f.unidad || "",
         descripcion: f.descripcion || "", peso: f.peso || "", observaciones: ""
       }));
+    } else if(texto){
+      const textoRecortado = recortarDesdeEncabezadoTabla(texto).trim() || texto.trim();
+      if(grupo.items.length === 0) grupo.items.push({ id: "item_" + Date.now(), codigo: "", cantidad: "", unidad: "", descripcion: "", peso: "", observaciones: "" });
+      if(!grupo.items[0].descripcion) grupo.items[0].descripcion = textoRecortado.substring(0, 800);
     }
 
     const esNuevo = grupo._nueva;
@@ -1930,8 +1946,10 @@ async function subirArchivoParaGrupoAlm(grupoId, file){
     grupo.items = data.items;
     if(esNuevo){ grupo.id = data.id; grupo._nueva = false; }
 
-    if(filasDetectadas.length === 0 && texto){
-      alert("No pude separar el detalle automáticamente. Esto es lo que alcanzó a leer el documento — cópialo a mano donde corresponda:\n\n" + texto.substring(0, 500));
+    if(errorOCR){
+      alert("⚠️ No se pudo leer el documento con OCR:\n\n" + errorOCR + "\n\nEl archivo sí quedó adjuntado — completa las celdas a mano.");
+    } else if(filasDetectadas.length === 0 && texto){
+      alert("No pude separar el detalle en columnas — dejé el texto leído completo en la Descripción del primer ítem, para que lo repartas a mano entre las celdas que corresponda.");
     } else if(filasDetectadas.length > 0){
       alert(`Se detectaron ${filasDetectadas.length} ítems en el documento — revísalos y corrige lo que haga falta.`);
     }
