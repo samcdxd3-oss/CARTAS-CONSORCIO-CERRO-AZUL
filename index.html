@@ -1997,11 +1997,165 @@ async function cargarAlmacen(){
 
 function renderAlmacen(){
   const cont = document.getElementById("contenidoAlmacen");
-  const gruposFiltrados = filtroTipoAlm ? DATA_ALM.filter(g => g.tipo === filtroTipoAlm) : DATA_ALM;
   const contarGrupos = (t) => DATA_ALM.filter(g => g.tipo === t).length;
 
+  let cuerpo = "";
+  if(filtroTipoAlm === null) cuerpo = renderStockAlmacen();
+  else if(filtroTipoAlm === "salida") cuerpo = renderFormularioSalidaAlmacen() + renderTablaMovimientosAlm("salida");
+  else cuerpo = renderTablaMovimientosAlm("entrada");
+
+  cont.innerHTML = `
+    <div class="chips" style="margin-bottom:14px;">
+      <div class="chip ${filtroTipoAlm===null?'on':''}" onclick="filtrarAlm(null)">📊 Stock (Todos)</div>
+      <div class="chip ${filtroTipoAlm==='entrada'?'on':''}" onclick="filtrarAlm('entrada')">Entradas (${contarGrupos('entrada')})</div>
+      <div class="chip ${filtroTipoAlm==='salida'?'on':''}" onclick="filtrarAlm('salida')">Salidas (${contarGrupos('salida')})</div>
+    </div>
+    ${cuerpo}`;
+
+  if(filtroTipoAlm === "salida"){
+    const input = document.getElementById("buscadorProductoSalida");
+    if(input) input.addEventListener("input", () => renderResultadosProductoSalida(input.value.trim()));
+  }
+}
+
+// Junta todos los ítems de Entradas y Salidas por producto (código, o descripción si no hay código)
+// y calcula cuánto queda de cada uno.
+function calcularStockAlmacen(){
+  const mapa = {};
+  DATA_ALM.forEach(grupo => {
+    grupo.items.forEach(item => {
+      const clave = (item.codigo && item.codigo.trim()) || (item.descripcion || "").trim().toUpperCase();
+      if(!clave) return;
+      if(!mapa[clave]){
+        mapa[clave] = { codigo: item.codigo || "", descripcion: item.descripcion || "", unidad: item.unidad || "", entradas: 0, salidas: 0 };
+      }
+      if(!mapa[clave].descripcion && item.descripcion) mapa[clave].descripcion = item.descripcion;
+      if(!mapa[clave].unidad && item.unidad) mapa[clave].unidad = item.unidad;
+      const cantidad = parseFloat(String(item.cantidad || "0").replace(",", ".")) || 0;
+      if(grupo.tipo === "entrada") mapa[clave].entradas += cantidad;
+      else mapa[clave].salidas += cantidad;
+    });
+  });
+  return Object.keys(mapa).map(clave => {
+    const p = mapa[clave];
+    return { clave, ...p, stock: Math.round((p.entradas - p.salidas) * 100) / 100 };
+  }).sort((a, b) => a.descripcion.localeCompare(b.descripcion));
+}
+
+function renderStockAlmacen(){
+  const stock = calcularStockAlmacen();
+  if(stock.length === 0){
+    return `<div class="modal-aviso">Todavía no hay movimientos registrados — agrega una Entrada primero.</div>`;
+  }
+  return `
+    <div class="grid-wrap">
+      <table class="grid">
+        <thead><tr>
+          <th style="width:90px;">CÓDIGO</th>
+          <th>DESCRIPCIÓN</th>
+          <th style="width:70px;">UND</th>
+          <th style="width:100px;">ENTRADAS</th>
+          <th style="width:100px;">SALIDAS</th>
+          <th style="width:110px;">STOCK ACTUAL</th>
+        </tr></thead>
+        <tbody>
+          ${stock.map(p => `
+            <tr>
+              <td style="text-align:center;font-family:'IBM Plex Mono',monospace;">${escapeHtml(p.codigo)}</td>
+              <td>${escapeHtml(p.descripcion) || "<i style='color:var(--ink-soft);'>(sin descripción)</i>"}</td>
+              <td style="text-align:center;">${escapeHtml(p.unidad)}</td>
+              <td style="text-align:center;color:var(--cat-supervision);">${p.entradas}</td>
+              <td style="text-align:center;color:var(--stamp-orange);">${p.salidas}</td>
+              <td style="text-align:center;font-weight:700;font-size:15px;${p.stock<=0?'color:var(--stamp-error);':''}">${p.stock}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:11.5px;color:var(--ink-soft);margin-top:10px;">📊 El stock se calcula solo con las Entradas y Salidas que ya registraste — no se guarda aparte, siempre se recalcula al momento.</p>`;
+}
+
+function renderFormularioSalidaAlmacen(){
+  return `
+    <div style="border:1.5px solid var(--ink); border-radius:10px; padding:14px; margin-bottom:16px; background:var(--paper-dim);">
+      <div style="font-weight:700; margin-bottom:8px;">📤 Registrar nueva salida</div>
+      <label>Busca el producto por código o descripción</label>
+      <input type="text" id="buscadorProductoSalida" placeholder="Ej: 11866 o CEMENTO" autocomplete="off">
+      <div id="resultadosProductoSalida" style="margin-top:8px;"></div>
+    </div>`;
+}
+
+function renderResultadosProductoSalida(termino){
+  const cont = document.getElementById("resultadosProductoSalida");
+  if(!cont) return;
+  const stock = calcularStockAlmacen();
+
+  if(!termino){
+    cont.innerHTML = `<div class="modal-aviso">Escribe para buscar entre los productos que ya tienen entradas registradas.</div>`;
+    return;
+  }
+
+  const t = termino.toUpperCase();
+  const encontrados = stock.filter(p => p.codigo.toUpperCase().includes(t) || p.descripcion.toUpperCase().includes(t)).slice(0, 20);
+
+  if(encontrados.length === 0){
+    cont.innerHTML = `<div class="modal-aviso">No se encontró ningún producto con "${escapeHtml(termino)}".</div>`;
+    return;
+  }
+
+  cont.innerHTML = encontrados.map(p => `
+    <div class="resultado-busqueda" style="grid-template-columns:1fr auto;">
+      <span>
+        <b>${escapeHtml(p.descripcion) || escapeHtml(p.codigo)}</b><br>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-soft);">Código: ${escapeHtml(p.codigo) || "—"} · Quedan: <b style="${p.stock<=0?'color:var(--stamp-error);':''}">${p.stock} ${escapeHtml(p.unidad)}</b></span>
+      </span>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <input type="text" id="cantSalida_${p.clave.replace(/[^a-zA-Z0-9]/g,'_')}" placeholder="Cant." style="width:70px;">
+        <button class="btn-secundario" onclick="registrarSalidaRapida('${p.clave.replace(/'/g,"\\'")}')">Registrar</button>
+      </div>
+    </div>`).join("");
+}
+
+async function registrarSalidaRapida(clave){
+  const stock = calcularStockAlmacen();
+  const producto = stock.find(p => p.clave === clave);
+  if(!producto) return;
+
+  const inputCant = document.getElementById("cantSalida_" + clave.replace(/[^a-zA-Z0-9]/g, "_"));
+  const cantidad = inputCant ? inputCant.value.trim() : "";
+  if(!cantidad || isNaN(parseFloat(cantidad.replace(",", ".")))){
+    alert("Escribe una cantidad válida.");
+    return;
+  }
+  if(parseFloat(cantidad.replace(",", ".")) > producto.stock){
+    if(!confirm(`Solo quedan ${producto.stock} ${producto.unidad} en stock. ¿De todas formas quieres registrar una salida de ${cantidad}?`)) return;
+  }
+
+  const pin = await pedirPin();
+  if(!pin) return;
+
+  try {
+    const body = {
+      accion: "guardarGrupoAlmacen", pin, id: null,
+      fecha: isoADDMMYYYY(new Date().toISOString().split("T")[0]),
+      tipo: "salida",
+      items: [{ codigo: producto.codigo, cantidad, unidad: producto.unidad, descripcion: producto.descripcion, peso: "", observaciones: "" }]
+    };
+    const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+
+    DATA_ALM.push({ id: data.id, fecha: body.fecha, tipo: "salida", link: data.link || "", items: data.items });
+    renderAlmacen();
+  } catch (err) {
+    alert("No se pudo registrar la salida: " + err.message);
+    pinSesion = "";
+  }
+}
+
+function renderTablaMovimientosAlm(tipoFiltro){
+  const grupos = DATA_ALM.filter(g => g.tipo === tipoFiltro);
   let filasHtml = "";
-  gruposFiltrados.forEach(grupo => {
+  grupos.forEach(grupo => {
     const color = grupo.tipo === "entrada" ? "var(--cat-supervision)" : "var(--stamp-orange)";
     filasHtml += `<tr>
       <td colspan="8" style="background:var(--paper-dim);padding:8px 12px;">
@@ -2020,13 +2174,11 @@ function renderAlmacen(){
     grupo.items.forEach((item, i) => { filasHtml += filaItemAlmHTML(grupo.id, item, i + 1); });
   });
 
-  cont.innerHTML = `
-    <div class="chips" style="margin-bottom:14px;">
-      <div class="chip ${filtroTipoAlm===null?'on':''}" onclick="filtrarAlm(null)">Todos (${DATA_ALM.length})</div>
-      <div class="chip ${filtroTipoAlm==='entrada'?'on':''}" onclick="filtrarAlm('entrada')">Entradas (${contarGrupos('entrada')})</div>
-      <div class="chip ${filtroTipoAlm==='salida'?'on':''}" onclick="filtrarAlm('salida')">Salidas (${contarGrupos('salida')})</div>
-    </div>
+  const botonAgregar = tipoFiltro === "entrada"
+    ? `<button class="btn-secundario" style="margin-top:12px;" onclick="agregarGrupoAlmVacio('entrada')">+ Nueva entrada</button>`
+    : `<button class="btn-secundario" style="margin-top:12px;" onclick="agregarGrupoAlmVacio('salida')">+ Salida manual (sin descontar stock)</button>`;
 
+  return `
     <div class="grid-wrap">
       <table class="grid">
         <thead><tr>
@@ -2039,10 +2191,10 @@ function renderAlmacen(){
           <th style="width:150px;">OBSERVACIONES</th>
           <th style="width:34px;"></th>
         </tr></thead>
-        <tbody id="cuerpoGridAlm">${filasHtml}</tbody>
+        <tbody id="cuerpoGridAlm">${filasHtml || `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--ink-soft);">Sin movimientos ${tipoFiltro==='entrada'?'de entrada':'de salida'} todavía.</td></tr>`}</tbody>
       </table>
     </div>
-    <button class="btn-secundario" style="margin-top:12px;" onclick="agregarGrupoAlmVacio()">+ Nuevo movimiento</button>
+    ${botonAgregar}
     <p style="font-size:11.5px;color:var(--ink-soft);margin-top:10px;">💾 Cada celda se guarda sola al tocar fuera de ella. Todos los ítems de una misma guía quedan agrupados juntos.</p>`;
 }
 
@@ -2064,12 +2216,12 @@ function filaItemAlmHTML(grupoId, item, numeroItem){
   </tr>`;
 }
 
-function agregarGrupoAlmVacio(){
+function agregarGrupoAlmVacio(tipo){
   const tempId = "nuevo_" + Date.now();
   DATA_ALM.push({
     id: tempId, _nueva: true,
     fecha: isoADDMMYYYY(new Date().toISOString().split("T")[0]),
-    tipo: "entrada", link: "",
+    tipo: tipo || "entrada", link: "",
     items: [{ id: "item_" + Date.now(), codigo: "", cantidad: "", unidad: "", descripcion: "", peso: "", observaciones: "" }]
   });
   renderAlmacen();
