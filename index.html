@@ -1327,6 +1327,21 @@ function isoADDMMYYYY(iso){
   return `${d}/${m}/${a}`;
 }
 
+// Intenta separar el texto del OCR en varios ítems (cantidad + unidad + descripción),
+// para tablas con varias filas (como tu orden de requerimiento o guía de almacén).
+// Si no logra reconocer el patrón en ninguna línea, devuelve un arreglo vacío —
+// mejor no rellenar nada a adivinar basura del encabezado.
+function detectarFilasDesdeTexto(texto){
+  const lineas = String(texto || "").split("\n").map(l => l.trim()).filter(Boolean);
+  const regex = /^\S+\s+(\d+(?:[.,]\d+)?)\s+([A-Za-zÁÉÍÓÚÑñ.\-]{2,12})\s+(.+)$/;
+  const filas = [];
+  lineas.forEach(linea => {
+    const m = linea.match(regex);
+    if(m) filas.push({ cantidad: m[1], unidad: m[2].toUpperCase(), descripcion: m[3].trim() });
+  });
+  return filas;
+}
+
 function renderRequerimientos(){
   const cont = document.getElementById("contenidoRequerimientos");
   const filtradas = filtroEstadoReq ? DATA_REQ.filter(r => r.estado === filtroEstadoReq) : DATA_REQ;
@@ -1535,7 +1550,6 @@ async function subirArchivoParaFilaReq(id, file){
   try {
     const base64 = await archivoABase64(file);
 
-    // Intenta leer el texto para sugerir la Descripción si está vacía (no se fuerza nada más)
     let texto = "";
     try {
       const resOCR = await fetch(API_URL, {
@@ -1547,17 +1561,16 @@ async function subirArchivoParaFilaReq(id, file){
       if(dataOCR.ok) texto = dataOCR.texto || "";
     } catch (e) { /* seguimos aunque el OCR falle */ }
 
-    const descripcionActual = tr.querySelector(".c-descripcion").value.trim();
-    const primerLinea = texto.split("\n").map(l => l.trim()).filter(Boolean)[0] || "";
-    if(!descripcionActual && primerLinea) tr.querySelector(".c-descripcion").value = primerLinea;
+    const filasDetectadas = detectarFilasDesdeTexto(texto);
+    const primera = filasDetectadas[0];
 
     const esNueva = item._nueva;
     const body = {
       accion: "guardarRequerimiento", pin, id: esNueva ? null : id,
       fecha: item.fecha,
-      cantidad: tr.querySelector(".c-cantidad").value.trim(),
-      unidad: tr.querySelector(".c-unidad").value.trim(),
-      descripcion: tr.querySelector(".c-descripcion").value.trim(),
+      cantidad: primera ? primera.cantidad : tr.querySelector(".c-cantidad").value.trim(),
+      unidad: primera ? primera.unidad : tr.querySelector(".c-unidad").value.trim(),
+      descripcion: primera ? primera.descripcion : tr.querySelector(".c-descripcion").value.trim(),
       partida: tr.querySelector(".c-partida").value.trim(),
       observaciones: tr.querySelector(".c-observaciones").value.trim(),
       estado: item.estado, area: item.area,
@@ -1576,6 +1589,30 @@ async function subirArchivoParaFilaReq(id, file){
     item.cantidad = body.cantidad; item.unidad = body.unidad; item.descripcion = body.descripcion;
     item.partida = body.partida; item.observaciones = body.observaciones;
     if(esNueva){ item.id = data.id; item._nueva = false; }
+
+    // Si el documento tenía más de un ítem, creamos una fila por cada uno extra,
+    // reutilizando el mismo archivo ya subido (sin volver a subirlo).
+    if(filasDetectadas.length > 1){
+      for(let i = 1; i < filasDetectadas.length; i++){
+        const f = filasDetectadas[i];
+        const resX = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            accion: "guardarRequerimiento", pin, id: null,
+            fecha: item.fecha, cantidad: f.cantidad, unidad: f.unidad, descripcion: f.descripcion,
+            partida: "", observaciones: "", estado: "pendiente", area: "", link: data.link
+          })
+        });
+        const dataX = await resX.json();
+        if(dataX.ok){
+          DATA_REQ.push({ id: dataX.id, fecha: item.fecha, cantidad: f.cantidad, unidad: f.unidad, descripcion: f.descripcion, partida: "", observaciones: "", estado: "pendiente", area: "", link: data.link });
+        }
+      }
+      alert(`Se detectaron ${filasDetectadas.length} ítems en el documento — se crearon ${filasDetectadas.length} filas. Revísalas y corrige lo que haga falta.`);
+    } else if(filasDetectadas.length === 0 && texto){
+      alert("No pude separar el detalle automáticamente. Esto es lo que alcanzó a leer el documento — cópialo a mano donde corresponda:\n\n" + texto.substring(0, 500));
+    }
 
     renderRequerimientos();
   } catch (err) {
@@ -1808,17 +1845,16 @@ async function subirArchivoParaFilaAlm(id, file){
       if(dataOCR.ok) texto = dataOCR.texto || "";
     } catch (e) { /* seguimos aunque el OCR falle */ }
 
-    const descripcionActual = tr.querySelector(".c-descripcion").value.trim();
-    const primerLinea = texto.split("\n").map(l => l.trim()).filter(Boolean)[0] || "";
-    if(!descripcionActual && primerLinea) tr.querySelector(".c-descripcion").value = primerLinea;
+    const filasDetectadas = detectarFilasDesdeTexto(texto);
+    const primera = filasDetectadas[0];
 
     const esNueva = item._nueva;
     const body = {
       accion: "guardarAlmacen", pin, id: esNueva ? null : id,
       fecha: item.fecha, tipo: item.tipo,
-      cantidad: tr.querySelector(".c-cantidad").value.trim(),
-      unidad: tr.querySelector(".c-unidad").value.trim(),
-      descripcion: tr.querySelector(".c-descripcion").value.trim(),
+      cantidad: primera ? primera.cantidad : tr.querySelector(".c-cantidad").value.trim(),
+      unidad: primera ? primera.unidad : tr.querySelector(".c-unidad").value.trim(),
+      descripcion: primera ? primera.descripcion : tr.querySelector(".c-descripcion").value.trim(),
       observaciones: tr.querySelector(".c-observaciones").value.trim(),
       archivoBase64: base64, mimeType: file.type || "application/pdf"
     };
@@ -1835,6 +1871,28 @@ async function subirArchivoParaFilaAlm(id, file){
     item.cantidad = body.cantidad; item.unidad = body.unidad;
     item.descripcion = body.descripcion; item.observaciones = body.observaciones;
     if(esNueva){ item.id = data.id; item._nueva = false; }
+
+    if(filasDetectadas.length > 1){
+      for(let i = 1; i < filasDetectadas.length; i++){
+        const f = filasDetectadas[i];
+        const resX = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            accion: "guardarAlmacen", pin, id: null,
+            fecha: item.fecha, tipo: item.tipo, cantidad: f.cantidad, unidad: f.unidad,
+            descripcion: f.descripcion, observaciones: "", link: data.link
+          })
+        });
+        const dataX = await resX.json();
+        if(dataX.ok){
+          DATA_ALM.push({ id: dataX.id, fecha: item.fecha, tipo: item.tipo, cantidad: f.cantidad, unidad: f.unidad, descripcion: f.descripcion, observaciones: "", link: data.link });
+        }
+      }
+      alert(`Se detectaron ${filasDetectadas.length} ítems en el documento — se crearon ${filasDetectadas.length} filas. Revísalas y corrige lo que haga falta.`);
+    } else if(filasDetectadas.length === 0 && texto){
+      alert("No pude separar el detalle automáticamente. Esto es lo que alcanzó a leer el documento — cópialo a mano donde corresponda:\n\n" + texto.substring(0, 500));
+    }
 
     renderAlmacen();
   } catch (err) {
