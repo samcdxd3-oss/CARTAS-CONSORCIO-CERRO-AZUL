@@ -369,7 +369,7 @@
     <h1 style="flex:1;">Almacén</h1>
     <img src="logo.png" alt="Consorcio Cerro Azul" style="height:34px;width:auto;">
   </div></header>
-  <div id="contenidoAlmacen" style="max-width:820px;margin:0 auto;padding:16px;">
+  <div id="contenidoAlmacen" style="max-width:1300px;margin:0 auto;padding:16px;">
     <div class="estado">Cargando...</div>
   </div>
 </div>
@@ -380,7 +380,7 @@
     <h1 style="flex:1;">Requerimientos</h1>
     <img src="logo.png" alt="Consorcio Cerro Azul" style="height:34px;width:auto;">
   </div></header>
-  <div id="contenidoRequerimientos" style="max-width:820px;margin:0 auto;padding:16px;">
+  <div id="contenidoRequerimientos" style="max-width:1300px;margin:0 auto;padding:16px;">
     <div class="estado">Cargando...</div>
   </div>
 </div>
@@ -1330,43 +1330,38 @@ function isoADDMMYYYY(iso){
 function renderRequerimientos(){
   const cont = document.getElementById("contenidoRequerimientos");
   const filtradas = filtroEstadoReq ? DATA_REQ.filter(r => r.estado === filtroEstadoReq) : DATA_REQ;
-  const ordenadas = [...filtradas].reverse(); // más recientes primero
   const contar = (est) => DATA_REQ.filter(r => r.estado === est).length;
 
   cont.innerHTML = `
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-      <button class="btn-secundario" onclick="nuevoRequerimientoManual()">✏️ Nuevo requerimiento (manual)</button>
-    </div>
-    <label>📥 O sube una foto/PDF (se transcribe solo)</label>
-    <div class="dropzone" id="dropzoneReq">
-      <span class="icono">📄</span>
-      <span class="texto" id="dropzoneReqTexto">Arrastra la foto/PDF aquí, o toca para elegirla</span>
-    </div>
-    <input type="file" id="reqArchivoOculto" accept="image/*,application/pdf" style="display:none">
-
-    <div class="chips" style="margin:14px 0;">
+    <div class="chips" style="margin-bottom:14px;">
       <div class="chip ${filtroEstadoReq===null?'on':''}" onclick="filtrarReq(null)">Todos (${DATA_REQ.length})</div>
       <div class="chip ${filtroEstadoReq==='pendiente'?'on':''}" onclick="filtrarReq('pendiente')">Pendiente (${contar('pendiente')})</div>
       <div class="chip ${filtroEstadoReq==='pedido'?'on':''}" onclick="filtrarReq('pedido')">Pedido realizado (${contar('pedido')})</div>
       <div class="chip ${filtroEstadoReq==='entregado'?'on':''}" onclick="filtrarReq('entregado')">Entregado (${contar('entregado')})</div>
     </div>
 
-    <div id="listaRequerimientos"></div>`;
-
-  const dz = document.getElementById("dropzoneReq");
-  const inputOculto = document.getElementById("reqArchivoOculto");
-  dz.addEventListener("click", () => inputOculto.click());
-  inputOculto.addEventListener("change", () => { if(inputOculto.files[0]) manejarArchivoReq(inputOculto.files[0]); });
-  ["dragover","dragenter"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("arrastrando"); }));
-  ["dragleave","drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("arrastrando"); }));
-  dz.addEventListener("drop", e => { if(e.dataTransfer.files[0]) manejarArchivoReq(e.dataTransfer.files[0]); });
-
-  const lista = document.getElementById("listaRequerimientos");
-  if(ordenadas.length === 0){
-    lista.innerHTML = `<div class="modal-aviso">No hay requerimientos ${filtroEstadoReq ? "en este estado" : "todavía"}.</div>`;
-    return;
-  }
-  lista.innerHTML = ordenadas.map((r, i) => tarjetaRequerimiento(r, ordenadas.length - i)).join("");
+    <div class="grid-wrap">
+      <table class="grid">
+        <thead><tr>
+          <th style="width:44px;">ITEM</th>
+          <th style="width:90px;">CANTIDAD</th>
+          <th style="width:70px;">UND</th>
+          <th>DESCRIPCIÓN</th>
+          <th style="width:150px;">PARTIDA A EJECUTAR</th>
+          <th style="width:170px;">OBSERVACIONES</th>
+          <th style="width:44px;">📎</th>
+          <th style="width:56px;">Pend.</th>
+          <th style="width:56px;">Pedido</th>
+          <th style="width:64px;">Entreg.</th>
+          <th style="width:34px;"></th>
+        </tr></thead>
+        <tbody id="cuerpoGridReq">
+          ${filtradas.map((r, i) => filaReqHTML(r, i + 1)).join("")}
+        </tbody>
+      </table>
+    </div>
+    <button class="btn-secundario" style="margin-top:12px;" onclick="agregarFilaReqVacia()">+ Nuevo requerimiento</button>
+    <p style="font-size:11.5px;color:var(--ink-soft);margin-top:10px;">💾 Cada celda se guarda sola al tocar fuera de ella. Usa 📎 para adjuntar la foto/PDF de esa fila.</p>`;
 }
 
 function filtrarReq(estado){
@@ -1374,33 +1369,88 @@ function filtrarReq(estado){
   renderRequerimientos();
 }
 
-function tarjetaRequerimiento(r, numeroItem){
-  const colorEstado = r.estado === "entregado" ? "var(--cat-supervision)" : r.estado === "pedido" ? "var(--cat-emitida)" : "var(--stamp-orange)";
-  const etiquetaEstado = r.estado === "entregado" ? "ENTREGADO" : r.estado === "pedido" ? "PEDIDO REALIZADO" : "PENDIENTE";
-  return `
-    <div class="card">
-      <span class="stamp" style="color:${colorEstado};border-color:${colorEstado};">${etiquetaEstado}</span>
-      <div style="display:flex;gap:8px;align-items:baseline;margin-bottom:4px;">
-        <span class="numero" style="font-size:12px;">ITEM ${String(numeroItem).padStart(2,"0")}</span>
-        <span class="fecha">${escapeHtml(r.fecha)}</span>
-      </div>
-      <div onclick="editarRequerimiento('${r.id}')" style="cursor:pointer;">
-        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;margin-bottom:4px;">
-          ${r.cantidad ? `<span><b style="color:var(--ink);">${escapeHtml(r.cantidad)}</b> ${escapeHtml(r.unidad||"")}</span>` : ""}
-        </div>
-        <div class="asunto">${escapeHtml(r.descripcion) || "<i style='color:var(--ink-soft);'>(toca para completar)</i>"}</div>
-        ${r.partida ? `<div style="font-size:12.5px;color:var(--ink-soft);margin-top:2px;">📍 Partida: ${escapeHtml(r.partida)}</div>` : ""}
-        ${r.observaciones ? `<div style="font-size:12.5px;color:var(--ink-soft);margin-top:2px;">📝 ${escapeHtml(r.observaciones)}</div>` : ""}
-      </div>
-      ${r.area ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">✅ Entregado a: ${escapeHtml(r.area)}</div>` : ""}
-      ${r.link ? `<a class="link" href="${r.link}" target="_blank" rel="noopener">📄 Ver foto/PDF →</a>` : ""}
-      <div class="segmentado" style="margin-top:12px;">
-        <button type="button" class="${r.estado==='pendiente'?'on':''}" onclick="cambiarEstadoReq('${r.id}', 'pendiente')">Pendiente</button>
-        <button type="button" class="${r.estado==='pedido'?'on':''}" onclick="cambiarEstadoReq('${r.id}', 'pedido')">Pedido</button>
-        <button type="button" class="${r.estado==='entregado'?'on':''}" onclick="cambiarEstadoReq('${r.id}', 'entregado')">Entregado</button>
-      </div>
-      <button class="btn-fila borrar" style="margin-top:10px;width:34px;" onclick="eliminarReq('${r.id}')" title="Quitar">✕</button>
-    </div>`;
+function filaReqHTML(r, numeroItem){
+  return `<tr data-id="${r.id}">
+    <td style="text-align:center;font-weight:700;font-family:'IBM Plex Mono',monospace;">${String(numeroItem).padStart(2,"0")}</td>
+    <td><input class="c-cantidad" value="${escapeAtributo(r.cantidad||"")}" onblur="autoguardarReq('${r.id}')"></td>
+    <td><input class="c-unidad" value="${escapeAtributo(r.unidad||"")}" onblur="autoguardarReq('${r.id}')"></td>
+    <td><input class="c-descripcion" value="${escapeAtributo(r.descripcion||"")}" onblur="autoguardarReq('${r.id}')"></td>
+    <td><input class="c-partida" value="${escapeAtributo(r.partida||"")}" onblur="autoguardarReq('${r.id}')"></td>
+    <td><input class="c-observaciones" value="${escapeAtributo(r.observaciones||"")}" onblur="autoguardarReq('${r.id}')"></td>
+    <td style="text-align:center;">
+      ${r.link
+        ? `<a href="${r.link}" target="_blank" rel="noopener" title="Ver archivo" style="font-size:16px;">📄</a>`
+        : `<button type="button" onclick="adjuntarArchivoReq('${r.id}')" title="Adjuntar foto/PDF" style="background:transparent;border:none;cursor:pointer;font-size:16px;">📎</button>`}
+    </td>
+    <td style="text-align:center;"><input type="checkbox" ${r.estado==='pendiente'?'checked':''} onchange="cambiarEstadoReq('${r.id}','pendiente')"></td>
+    <td style="text-align:center;"><input type="checkbox" ${r.estado==='pedido'?'checked':''} onchange="cambiarEstadoReq('${r.id}','pedido')"></td>
+    <td style="text-align:center;"><input type="checkbox" ${r.estado==='entregado'?'checked':''} onchange="cambiarEstadoReq('${r.id}','entregado')"></td>
+    <td><button class="btn-fila borrar" onclick="eliminarReq('${r.id}')" title="Quitar">✕</button></td>
+  </tr>`;
+}
+
+function agregarFilaReqVacia(){
+  const tempId = "nuevo_" + Date.now();
+  DATA_REQ.push({
+    id: tempId, _nueva: true,
+    fecha: isoADDMMYYYY(new Date().toISOString().split("T")[0]),
+    cantidad: "", unidad: "", descripcion: "", partida: "", observaciones: "",
+    estado: "pendiente", area: "", link: ""
+  });
+  renderRequerimientos();
+  setTimeout(() => {
+    const tr = document.querySelector(`tr[data-id="${tempId}"]`);
+    if(tr) tr.querySelector(".c-cantidad").focus();
+  }, 50);
+}
+
+async function autoguardarReq(id){
+  const tr = document.querySelector(`tr[data-id="${id}"]`);
+  const item = DATA_REQ.find(r => r.id === id);
+  if(!tr || !item) return;
+
+  const cantidad = tr.querySelector(".c-cantidad").value.trim();
+  const unidad = tr.querySelector(".c-unidad").value.trim();
+  const descripcion = tr.querySelector(".c-descripcion").value.trim();
+  const partida = tr.querySelector(".c-partida").value.trim();
+  const observaciones = tr.querySelector(".c-observaciones").value.trim();
+
+  if(!cantidad && !descripcion) return; // fila todavía vacía, nada que guardar
+
+  const pin = await pedirPin();
+  if(!pin) return;
+
+  tr.style.transition = "background-color .3s";
+  tr.style.backgroundColor = "#EAF3FD";
+
+  try {
+    const esNueva = item._nueva;
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        accion: "guardarRequerimiento", pin, id: esNueva ? null : id,
+        fecha: item.fecha, cantidad, unidad, descripcion, partida, observaciones,
+        estado: item.estado, area: item.area
+      })
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+
+    item.cantidad = cantidad; item.unidad = unidad; item.descripcion = descripcion;
+    item.partida = partida; item.observaciones = observaciones;
+
+    tr.style.backgroundColor = "#D6EAFB";
+    setTimeout(() => { tr.style.backgroundColor = ""; }, 900);
+
+    if(esNueva){
+      item.id = data.id; item._nueva = false;
+      renderRequerimientos(); // solo una vez, para que la fila quede con su id real
+    }
+  } catch (err) {
+    tr.style.backgroundColor = "#FBDCDC";
+    alert("No se pudo guardar: " + err.message);
+  }
 }
 
 async function cambiarEstadoReq(id, nuevoEstado){
@@ -1410,12 +1460,12 @@ async function cambiarEstadoReq(id, nuevoEstado){
   let area = item.area || "";
   if(nuevoEstado === "entregado"){
     const respuesta = prompt("¿A qué área se entregó?", area);
-    if(!respuesta) return;
+    if(!respuesta){ renderRequerimientos(); return; }
     area = respuesta;
   }
 
   const pin = await pedirPin();
-  if(!pin) return;
+  if(!pin){ renderRequerimientos(); return; }
 
   try {
     const res = await fetch(API_URL, {
@@ -1436,10 +1486,14 @@ async function cambiarEstadoReq(id, nuevoEstado){
   } catch (err) {
     alert("No se pudo actualizar: " + err.message);
     pinSesion = "";
+    renderRequerimientos();
   }
 }
 
 async function eliminarReq(id){
+  const item = DATA_REQ.find(r => r.id === id);
+  if(item && item._nueva){ DATA_REQ = DATA_REQ.filter(r => r.id !== id); renderRequerimientos(); return; }
+
   if(!confirm("¿Quitar este requerimiento?\n\nEsto borra el registro y manda la foto/PDF a la papelera de Drive.")) return;
   const pin = await pedirPin();
   if(!pin) return;
@@ -1460,129 +1514,56 @@ async function eliminarReq(id){
   }
 }
 
-async function manejarArchivoReq(file){
-  const dzTexto = document.getElementById("dropzoneReqTexto");
-  dzTexto.textContent = "🔍 Leyendo el documento con OCR...";
-
-  const pin = await pedirPin();
-  if(!pin){ dzTexto.textContent = "Arrastra la foto/PDF aquí, o toca para elegirla"; return; }
-
-  let texto = "";
-  let error = "";
-  const [resultadoOCR, preview] = await Promise.all([
-    (async () => {
-      try {
-        const base64 = await archivoABase64(file);
-        const res = await fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ accion: "leerTextoPlano", pin, archivoBase64: base64, mimeType: file.type || "application/pdf" })
-        });
-        const data = await res.json();
-        if(data.ok) return { texto: data.texto || "" };
-        return { error: data.error || "Error desconocido" };
-      } catch (err) {
-        return { error: "Error de conexión: " + err.message };
-      }
-    })(),
-    generarPreviewArchivo(file)
-  ]);
-  texto = resultadoOCR.texto || "";
-  error = resultadoOCR.error || "";
-
-  dzTexto.textContent = "Arrastra la foto/PDF aquí, o toca para elegirla";
-  abrirModalBurbujaReq(null, {}, error, file, preview, texto);
+function adjuntarArchivoReq(id){
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*,application/pdf";
+  input.onchange = () => { if(input.files[0]) subirArchivoParaFilaReq(id, input.files[0]); };
+  input.click();
 }
 
-function nuevoRequerimientoManual(){
-  abrirModalBurbujaReq(null, {}, "", null, null, "");
-}
-
-function editarRequerimiento(id){
+async function subirArchivoParaFilaReq(id, file){
   const item = DATA_REQ.find(r => r.id === id);
-  if(!item) return;
-  abrirModalBurbujaReq(item, item, "", null, null, "");
-}
-
-function abrirModalBurbujaReq(itemExistente, datos, error, file, preview, textoOCR){
-  const overlay = document.createElement("div");
-  overlay.className = "overlay-modal";
-  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
-
-  const fechaValor = itemExistente && itemExistente.fecha ? fechaAISO(itemExistente.fecha) : new Date().toISOString().split("T")[0];
-
-  overlay.innerHTML = `
-    <div class="modal-panel" style="max-width:${preview ? "1000px" : "560px"};">
-      <h3>📋 ${itemExistente ? "Editar" : "Nuevo"} requerimiento</h3>
-      ${file ? `<div class="archivo-nombre">${escapeHtml(file.name)}</div>` : ""}
-      ${error ? `<div class="modal-aviso">⚠️ No se pudo leer automáticamente (${escapeHtml(error)}). Completa a mano.</div>` : ""}
-      <div class="modal-body">
-        ${preview ? `<div class="modal-preview"><img src="${preview}" style="width:100%;border-radius:8px;border:1px solid var(--line);"></div>` : ""}
-        <div class="modal-fields" style="${preview ? "" : "flex:1;"}">
-          ${textoOCR ? `<label>Texto leído por el OCR (cópialo a las celdas de abajo)</label>
-            <textarea readonly rows="3" style="width:100%;background:var(--paper-dim);font-size:12px;padding:8px;border-radius:6px;border:1px solid var(--line);margin-bottom:10px;">${escapeHtml(textoOCR)}</textarea>` : ""}
-
-          <label>Fecha</label>
-          <input type="date" id="reqFechaModal" value="${fechaValor}">
-
-          <label>Cantidad</label>
-          <input type="text" id="reqCantidadModal" value="${escapeAtributo(datos.cantidad||"")}">
-
-          <label>Unidad</label>
-          <input type="text" id="reqUnidadModal" value="${escapeAtributo(datos.unidad||"")}" placeholder="UND, KG, BOLSA, ML...">
-
-          <label>Descripción</label>
-          <textarea id="reqDescripcionModal" rows="2">${escapeHtml(datos.descripcion||"")}</textarea>
-
-          <label>Partida a ejecutar</label>
-          <input type="text" id="reqPartidaModal" value="${escapeAtributo(datos.partida||"")}">
-
-          <label>Observaciones</label>
-          <textarea id="reqObservacionesModal" rows="2">${escapeHtml(datos.observaciones||"")}</textarea>
-
-          <div class="modal-botones">
-            <button class="cancelar" onclick="this.closest('.overlay-modal').remove()">Cancelar</button>
-            <button class="confirmar" id="btnGuardarReq" onclick="guardarBurbujaReq(${itemExistente ? `'${itemExistente.id}'` : "null"})">✅ Guardar</button>
-          </div>
-          <div class="msg-form" id="msgReq"></div>
-        </div>
-      </div>
-    </div>`;
-
-  document.body.appendChild(overlay);
-  window._archivoReqActual = file || null;
-}
-
-async function guardarBurbujaReq(idExistente){
-  const cantidad = document.getElementById("reqCantidadModal").value.trim();
-  const unidad = document.getElementById("reqUnidadModal").value.trim();
-  const descripcion = document.getElementById("reqDescripcionModal").value.trim();
-  const partida = document.getElementById("reqPartidaModal").value.trim();
-  const observaciones = document.getElementById("reqObservacionesModal").value.trim();
-  const fechaISO = document.getElementById("reqFechaModal").value;
-  const msg = document.getElementById("msgReq");
-
-  if(!descripcion && !cantidad){ msg.textContent = "Completa al menos la Cantidad o la Descripción."; msg.className = "msg-form err"; return; }
+  const tr = document.querySelector(`tr[data-id="${id}"]`);
+  if(!item || !tr) return;
 
   const pin = await pedirPin();
   if(!pin) return;
 
-  const btn = document.getElementById("btnGuardarReq");
-  btn.disabled = true; btn.textContent = "Guardando...";
-
-  const itemPrevio = idExistente ? DATA_REQ.find(r => r.id === idExistente) : null;
+  tr.style.opacity = "0.6";
 
   try {
+    const base64 = await archivoABase64(file);
+
+    // Intenta leer el texto para sugerir la Descripción si está vacía (no se fuerza nada más)
+    let texto = "";
+    try {
+      const resOCR = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ accion: "leerTextoPlano", pin, archivoBase64: base64, mimeType: file.type || "application/pdf" })
+      });
+      const dataOCR = await resOCR.json();
+      if(dataOCR.ok) texto = dataOCR.texto || "";
+    } catch (e) { /* seguimos aunque el OCR falle */ }
+
+    const descripcionActual = tr.querySelector(".c-descripcion").value.trim();
+    const primerLinea = texto.split("\n").map(l => l.trim()).filter(Boolean)[0] || "";
+    if(!descripcionActual && primerLinea) tr.querySelector(".c-descripcion").value = primerLinea;
+
+    const esNueva = item._nueva;
     const body = {
-      accion: "guardarRequerimiento", pin, id: idExistente,
-      fecha: isoADDMMYYYY(fechaISO), cantidad, unidad, descripcion, partida, observaciones,
-      estado: itemPrevio ? itemPrevio.estado : "pendiente",
-      area: itemPrevio ? itemPrevio.area : ""
+      accion: "guardarRequerimiento", pin, id: esNueva ? null : id,
+      fecha: item.fecha,
+      cantidad: tr.querySelector(".c-cantidad").value.trim(),
+      unidad: tr.querySelector(".c-unidad").value.trim(),
+      descripcion: tr.querySelector(".c-descripcion").value.trim(),
+      partida: tr.querySelector(".c-partida").value.trim(),
+      observaciones: tr.querySelector(".c-observaciones").value.trim(),
+      estado: item.estado, area: item.area,
+      archivoBase64: base64, mimeType: file.type || "application/pdf"
     };
-    if(window._archivoReqActual){
-      body.archivoBase64 = await archivoABase64(window._archivoReqActual);
-      body.mimeType = window._archivoReqActual.type || "application/pdf";
-    }
+
     const res = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -1591,14 +1572,15 @@ async function guardarBurbujaReq(idExistente){
     const data = await res.json();
     if(!data.ok) throw new Error(data.error || "Error desconocido");
 
-    document.querySelector(".overlay-modal").remove();
-    await cargarRequerimientos();
+    item.link = data.link;
+    item.cantidad = body.cantidad; item.unidad = body.unidad; item.descripcion = body.descripcion;
+    item.partida = body.partida; item.observaciones = body.observaciones;
+    if(esNueva){ item.id = data.id; item._nueva = false; }
 
-    if(!idExistente && confirm("✅ Guardado. ¿Agregar otro requerimiento?")) nuevoRequerimientoManual();
+    renderRequerimientos();
   } catch (err) {
-    msg.textContent = "❌ " + err.message;
-    msg.className = "msg-form err";
-    btn.disabled = false; btn.textContent = "✅ Guardar";
+    tr.style.opacity = "1";
+    alert("No se pudo subir el archivo: " + err.message);
   }
 }
 
@@ -1627,42 +1609,35 @@ async function cargarAlmacen(){
 function renderAlmacen(){
   const cont = document.getElementById("contenidoAlmacen");
   const filtradas = filtroTipoAlm ? DATA_ALM.filter(a => a.tipo === filtroTipoAlm) : DATA_ALM;
-  const ordenadas = [...filtradas].reverse();
   const contar = (t) => DATA_ALM.filter(a => a.tipo === t).length;
 
   cont.innerHTML = `
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-      <button class="btn-secundario" onclick="nuevoAlmacenManual()">✏️ Nuevo movimiento (manual)</button>
-    </div>
-    <label>📥 O sube una foto/PDF (guía, factura, vale, etc.)</label>
-    <div class="dropzone" id="dropzoneAlm">
-      <span class="icono">📦</span>
-      <span class="texto" id="dropzoneAlmTexto">Arrastra la foto/PDF aquí, o toca para elegirla</span>
-    </div>
-    <input type="file" id="almArchivoOculto" accept="image/*,application/pdf" style="display:none">
-
-    <div class="chips" style="margin:14px 0;">
+    <div class="chips" style="margin-bottom:14px;">
       <div class="chip ${filtroTipoAlm===null?'on':''}" onclick="filtrarAlm(null)">Todos (${DATA_ALM.length})</div>
       <div class="chip ${filtroTipoAlm==='entrada'?'on':''}" onclick="filtrarAlm('entrada')">Entradas (${contar('entrada')})</div>
       <div class="chip ${filtroTipoAlm==='salida'?'on':''}" onclick="filtrarAlm('salida')">Salidas (${contar('salida')})</div>
     </div>
 
-    <div id="listaAlmacen"></div>`;
-
-  const dz = document.getElementById("dropzoneAlm");
-  const inputOculto = document.getElementById("almArchivoOculto");
-  dz.addEventListener("click", () => inputOculto.click());
-  inputOculto.addEventListener("change", () => { if(inputOculto.files[0]) manejarArchivoAlm(inputOculto.files[0]); });
-  ["dragover","dragenter"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("arrastrando"); }));
-  ["dragleave","drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("arrastrando"); }));
-  dz.addEventListener("drop", e => { if(e.dataTransfer.files[0]) manejarArchivoAlm(e.dataTransfer.files[0]); });
-
-  const lista = document.getElementById("listaAlmacen");
-  if(ordenadas.length === 0){
-    lista.innerHTML = `<div class="modal-aviso">No hay movimientos ${filtroTipoAlm ? "de este tipo" : "todavía"}.</div>`;
-    return;
-  }
-  lista.innerHTML = ordenadas.map((a, i) => tarjetaAlmacen(a, ordenadas.length - i)).join("");
+    <div class="grid-wrap">
+      <table class="grid">
+        <thead><tr>
+          <th style="width:44px;">ITEM</th>
+          <th style="width:90px;">CANTIDAD</th>
+          <th style="width:70px;">UND</th>
+          <th>DESCRIPCIÓN</th>
+          <th style="width:190px;">OBSERVACIONES</th>
+          <th style="width:44px;">📎</th>
+          <th style="width:64px;">Entrada</th>
+          <th style="width:56px;">Salida</th>
+          <th style="width:34px;"></th>
+        </tr></thead>
+        <tbody id="cuerpoGridAlm">
+          ${filtradas.map((a, i) => filaAlmHTML(a, i + 1)).join("")}
+        </tbody>
+      </table>
+    </div>
+    <button class="btn-secundario" style="margin-top:12px;" onclick="agregarFilaAlmVacia()">+ Nuevo movimiento</button>
+    <p style="font-size:11.5px;color:var(--ink-soft);margin-top:10px;">💾 Cada celda se guarda sola al tocar fuera de ella. Usa 📎 para adjuntar la foto/PDF de esa fila.</p>`;
 }
 
 function filtrarAlm(tipo){
@@ -1670,27 +1645,117 @@ function filtrarAlm(tipo){
   renderAlmacen();
 }
 
-function tarjetaAlmacen(a, numeroItem){
-  const esEntrada = a.tipo === "entrada";
-  const color = esEntrada ? "var(--cat-supervision)" : "var(--stamp-orange)";
-  return `
-    <div class="card">
-      <span class="stamp" style="color:${color};border-color:${color};">${esEntrada ? "ENTRADA" : "SALIDA"}</span>
-      <div style="display:flex;gap:8px;align-items:baseline;margin-bottom:4px;">
-        <span class="numero" style="font-size:12px;">ITEM ${String(numeroItem).padStart(2,"0")}</span>
-        <span class="fecha">${escapeHtml(a.fecha)}</span>
-      </div>
-      <div onclick="editarAlmacen('${a.id}')" style="cursor:pointer;">
-        ${a.cantidad ? `<div style="font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:15px;color:${color};margin-bottom:4px;">${escapeHtml(a.cantidad)} ${escapeHtml(a.unidad||"")}</div>` : ""}
-        <div class="asunto">${escapeHtml(a.descripcion) || "<i style='color:var(--ink-soft);'>(toca para completar)</i>"}</div>
-        ${a.observaciones ? `<div style="font-size:12.5px;color:var(--ink-soft);margin-top:2px;">📝 ${escapeHtml(a.observaciones)}</div>` : ""}
-      </div>
-      ${a.link ? `<a class="link" href="${a.link}" target="_blank" rel="noopener">📄 Ver foto/PDF →</a>` : ""}
-      <button class="btn-fila borrar" style="margin-top:10px;width:34px;" onclick="eliminarAlm('${a.id}')" title="Quitar">✕</button>
-    </div>`;
+function filaAlmHTML(a, numeroItem){
+  return `<tr data-id="${a.id}">
+    <td style="text-align:center;font-weight:700;font-family:'IBM Plex Mono',monospace;">${String(numeroItem).padStart(2,"0")}</td>
+    <td><input class="c-cantidad" value="${escapeAtributo(a.cantidad||"")}" onblur="autoguardarAlm('${a.id}')"></td>
+    <td><input class="c-unidad" value="${escapeAtributo(a.unidad||"")}" onblur="autoguardarAlm('${a.id}')"></td>
+    <td><input class="c-descripcion" value="${escapeAtributo(a.descripcion||"")}" onblur="autoguardarAlm('${a.id}')"></td>
+    <td><input class="c-observaciones" value="${escapeAtributo(a.observaciones||"")}" onblur="autoguardarAlm('${a.id}')"></td>
+    <td style="text-align:center;">
+      ${a.link
+        ? `<a href="${a.link}" target="_blank" rel="noopener" title="Ver archivo" style="font-size:16px;">📄</a>`
+        : `<button type="button" onclick="adjuntarArchivoAlm('${a.id}')" title="Adjuntar foto/PDF" style="background:transparent;border:none;cursor:pointer;font-size:16px;">📎</button>`}
+    </td>
+    <td style="text-align:center;"><input type="checkbox" ${a.tipo==='entrada'?'checked':''} onchange="cambiarTipoAlm('${a.id}','entrada')"></td>
+    <td style="text-align:center;"><input type="checkbox" ${a.tipo==='salida'?'checked':''} onchange="cambiarTipoAlm('${a.id}','salida')"></td>
+    <td><button class="btn-fila borrar" onclick="eliminarAlm('${a.id}')" title="Quitar">✕</button></td>
+  </tr>`;
+}
+
+function agregarFilaAlmVacia(){
+  const tempId = "nuevo_" + Date.now();
+  DATA_ALM.push({
+    id: tempId, _nueva: true,
+    fecha: isoADDMMYYYY(new Date().toISOString().split("T")[0]),
+    cantidad: "", unidad: "", descripcion: "", observaciones: "",
+    tipo: "entrada", link: ""
+  });
+  renderAlmacen();
+  setTimeout(() => {
+    const tr = document.querySelector(`tr[data-id="${tempId}"]`);
+    if(tr) tr.querySelector(".c-cantidad").focus();
+  }, 50);
+}
+
+async function autoguardarAlm(id){
+  const tr = document.querySelector(`tr[data-id="${id}"]`);
+  const item = DATA_ALM.find(a => a.id === id);
+  if(!tr || !item) return;
+
+  const cantidad = tr.querySelector(".c-cantidad").value.trim();
+  const unidad = tr.querySelector(".c-unidad").value.trim();
+  const descripcion = tr.querySelector(".c-descripcion").value.trim();
+  const observaciones = tr.querySelector(".c-observaciones").value.trim();
+
+  if(!cantidad && !descripcion) return;
+
+  const pin = await pedirPin();
+  if(!pin) return;
+
+  tr.style.transition = "background-color .3s";
+  tr.style.backgroundColor = "#EAF3FD";
+
+  try {
+    const esNueva = item._nueva;
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        accion: "guardarAlmacen", pin, id: esNueva ? null : id,
+        fecha: item.fecha, tipo: item.tipo, cantidad, unidad, descripcion, observaciones
+      })
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+
+    item.cantidad = cantidad; item.unidad = unidad; item.descripcion = descripcion; item.observaciones = observaciones;
+
+    tr.style.backgroundColor = "#D6EAFB";
+    setTimeout(() => { tr.style.backgroundColor = ""; }, 900);
+
+    if(esNueva){
+      item.id = data.id; item._nueva = false;
+      renderAlmacen();
+    }
+  } catch (err) {
+    tr.style.backgroundColor = "#FBDCDC";
+    alert("No se pudo guardar: " + err.message);
+  }
+}
+
+async function cambiarTipoAlm(id, nuevoTipo){
+  const item = DATA_ALM.find(a => a.id === id);
+  if(!item) return;
+
+  const pin = await pedirPin();
+  if(!pin){ renderAlmacen(); return; }
+
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        accion: "guardarAlmacen", pin, id,
+        fecha: item.fecha, tipo: nuevoTipo, cantidad: item.cantidad, unidad: item.unidad,
+        descripcion: item.descripcion, observaciones: item.observaciones
+      })
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+    item.tipo = nuevoTipo;
+    renderAlmacen();
+  } catch (err) {
+    alert("No se pudo actualizar: " + err.message);
+    pinSesion = "";
+    renderAlmacen();
+  }
 }
 
 async function eliminarAlm(id){
+  const item = DATA_ALM.find(a => a.id === id);
+  if(item && item._nueva){ DATA_ALM = DATA_ALM.filter(a => a.id !== id); renderAlmacen(); return; }
+
   if(!confirm("¿Quitar este movimiento?\n\nEsto borra el registro y manda la foto/PDF a la papelera de Drive.")) return;
   const pin = await pedirPin();
   if(!pin) return;
@@ -1711,137 +1776,53 @@ async function eliminarAlm(id){
   }
 }
 
-async function manejarArchivoAlm(file){
-  const dzTexto = document.getElementById("dropzoneAlmTexto");
-  dzTexto.textContent = "🔍 Leyendo el documento con OCR...";
-
-  const pin = await pedirPin();
-  if(!pin){ dzTexto.textContent = "Arrastra la foto/PDF aquí, o toca para elegirla"; return; }
-
-  let texto = "";
-  let error = "";
-  const [resultadoOCR, preview] = await Promise.all([
-    (async () => {
-      try {
-        const base64 = await archivoABase64(file);
-        const res = await fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ accion: "leerTextoPlano", pin, archivoBase64: base64, mimeType: file.type || "application/pdf" })
-        });
-        const data = await res.json();
-        if(data.ok) return { texto: data.texto || "" };
-        return { error: data.error || "Error desconocido" };
-      } catch (err) {
-        return { error: "Error de conexión: " + err.message };
-      }
-    })(),
-    generarPreviewArchivo(file)
-  ]);
-  texto = resultadoOCR.texto || "";
-  error = resultadoOCR.error || "";
-
-  dzTexto.textContent = "Arrastra la foto/PDF aquí, o toca para elegirla";
-  abrirModalBurbujaAlm(null, {}, error, file, preview, texto);
+function adjuntarArchivoAlm(id){
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*,application/pdf";
+  input.onchange = () => { if(input.files[0]) subirArchivoParaFilaAlm(id, input.files[0]); };
+  input.click();
 }
 
-function nuevoAlmacenManual(){
-  abrirModalBurbujaAlm(null, {}, "", null, null, "");
-}
-
-function editarAlmacen(id){
+async function subirArchivoParaFilaAlm(id, file){
   const item = DATA_ALM.find(a => a.id === id);
-  if(!item) return;
-  abrirModalBurbujaAlm(item, item, "", null, null, "");
-}
-
-function abrirModalBurbujaAlm(itemExistente, datos, error, file, preview, textoOCR){
-  const overlay = document.createElement("div");
-  overlay.className = "overlay-modal";
-  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
-
-  const tipoInicial = itemExistente ? itemExistente.tipo : "entrada";
-  const fechaValor = itemExistente && itemExistente.fecha ? fechaAISO(itemExistente.fecha) : new Date().toISOString().split("T")[0];
-
-  overlay.innerHTML = `
-    <div class="modal-panel" style="max-width:${preview ? "1000px" : "560px"};">
-      <h3>📦 ${itemExistente ? "Editar" : "Nuevo"} movimiento</h3>
-      ${file ? `<div class="archivo-nombre">${escapeHtml(file.name)}</div>` : ""}
-      ${error ? `<div class="modal-aviso">⚠️ No se pudo leer automáticamente (${escapeHtml(error)}). Completa a mano.</div>` : ""}
-      <div class="modal-body">
-        ${preview ? `<div class="modal-preview"><img src="${preview}" style="width:100%;border-radius:8px;border:1px solid var(--line);"></div>` : ""}
-        <div class="modal-fields" style="${preview ? "" : "flex:1;"}">
-          ${textoOCR ? `<label>Texto leído por el OCR (cópialo a las celdas de abajo)</label>
-            <textarea readonly rows="3" style="width:100%;background:var(--paper-dim);font-size:12px;padding:8px;border-radius:6px;border:1px solid var(--line);margin-bottom:10px;">${escapeHtml(textoOCR)}</textarea>` : ""}
-
-          <label>Tipo</label>
-          <div class="segmentado">
-            <button type="button" id="almTipoEntrada" class="${tipoInicial==='entrada'?'on':''}" onclick="cambiarTipoAlmModal('entrada')">Entrada</button>
-            <button type="button" id="almTipoSalida" class="${tipoInicial==='salida'?'on':''}" onclick="cambiarTipoAlmModal('salida')">Salida</button>
-          </div>
-
-          <label>Fecha</label>
-          <input type="date" id="almFechaModal" value="${fechaValor}">
-
-          <label>Cantidad</label>
-          <input type="text" id="almCantidadModal" value="${escapeAtributo(datos.cantidad||"")}">
-
-          <label>Unidad</label>
-          <input type="text" id="almUnidadModal" value="${escapeAtributo(datos.unidad||"")}" placeholder="UND, KG, BOLSA, ML...">
-
-          <label>Descripción</label>
-          <textarea id="almDescripcionModal" rows="2">${escapeHtml(datos.descripcion||"")}</textarea>
-
-          <label>Observaciones</label>
-          <textarea id="almObservacionesModal" rows="2">${escapeHtml(datos.observaciones||"")}</textarea>
-
-          <div class="modal-botones">
-            <button class="cancelar" onclick="this.closest('.overlay-modal').remove()">Cancelar</button>
-            <button class="confirmar" id="btnGuardarAlm" onclick="guardarBurbujaAlm(${itemExistente ? `'${itemExistente.id}'` : "null"})">✅ Guardar</button>
-          </div>
-          <div class="msg-form" id="msgAlm"></div>
-        </div>
-      </div>
-    </div>`;
-
-  document.body.appendChild(overlay);
-  window._tipoAlmModalActual = tipoInicial;
-  window._archivoAlmActual = file || null;
-}
-
-function cambiarTipoAlmModal(tipo){
-  window._tipoAlmModalActual = tipo;
-  document.getElementById("almTipoEntrada").classList.toggle("on", tipo === "entrada");
-  document.getElementById("almTipoSalida").classList.toggle("on", tipo === "salida");
-}
-
-async function guardarBurbujaAlm(idExistente){
-  const cantidad = document.getElementById("almCantidadModal").value.trim();
-  const unidad = document.getElementById("almUnidadModal").value.trim();
-  const descripcion = document.getElementById("almDescripcionModal").value.trim();
-  const observaciones = document.getElementById("almObservacionesModal").value.trim();
-  const fechaISO = document.getElementById("almFechaModal").value;
-  const msg = document.getElementById("msgAlm");
-
-  if(!descripcion && !cantidad){ msg.textContent = "Completa al menos la Cantidad o la Descripción."; msg.className = "msg-form err"; return; }
+  const tr = document.querySelector(`tr[data-id="${id}"]`);
+  if(!item || !tr) return;
 
   const pin = await pedirPin();
   if(!pin) return;
 
-  const btn = document.getElementById("btnGuardarAlm");
-  btn.disabled = true; btn.textContent = "Guardando...";
+  tr.style.opacity = "0.6";
 
   try {
+    const base64 = await archivoABase64(file);
+
+    let texto = "";
+    try {
+      const resOCR = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ accion: "leerTextoPlano", pin, archivoBase64: base64, mimeType: file.type || "application/pdf" })
+      });
+      const dataOCR = await resOCR.json();
+      if(dataOCR.ok) texto = dataOCR.texto || "";
+    } catch (e) { /* seguimos aunque el OCR falle */ }
+
+    const descripcionActual = tr.querySelector(".c-descripcion").value.trim();
+    const primerLinea = texto.split("\n").map(l => l.trim()).filter(Boolean)[0] || "";
+    if(!descripcionActual && primerLinea) tr.querySelector(".c-descripcion").value = primerLinea;
+
+    const esNueva = item._nueva;
     const body = {
-      accion: "guardarAlmacen", pin, id: idExistente,
-      fecha: isoADDMMYYYY(fechaISO),
-      tipo: window._tipoAlmModalActual || "entrada",
-      cantidad, unidad, descripcion, observaciones
+      accion: "guardarAlmacen", pin, id: esNueva ? null : id,
+      fecha: item.fecha, tipo: item.tipo,
+      cantidad: tr.querySelector(".c-cantidad").value.trim(),
+      unidad: tr.querySelector(".c-unidad").value.trim(),
+      descripcion: tr.querySelector(".c-descripcion").value.trim(),
+      observaciones: tr.querySelector(".c-observaciones").value.trim(),
+      archivoBase64: base64, mimeType: file.type || "application/pdf"
     };
-    if(window._archivoAlmActual){
-      body.archivoBase64 = await archivoABase64(window._archivoAlmActual);
-      body.mimeType = window._archivoAlmActual.type || "application/pdf";
-    }
+
     const res = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -1850,14 +1831,15 @@ async function guardarBurbujaAlm(idExistente){
     const data = await res.json();
     if(!data.ok) throw new Error(data.error || "Error desconocido");
 
-    document.querySelector(".overlay-modal").remove();
-    await cargarAlmacen();
+    item.link = data.link;
+    item.cantidad = body.cantidad; item.unidad = body.unidad;
+    item.descripcion = body.descripcion; item.observaciones = body.observaciones;
+    if(esNueva){ item.id = data.id; item._nueva = false; }
 
-    if(!idExistente && confirm("✅ Guardado. ¿Agregar otro movimiento?")) nuevoAlmacenManual();
+    renderAlmacen();
   } catch (err) {
-    msg.textContent = "❌ " + err.message;
-    msg.className = "msg-form err";
-    btn.disabled = false; btn.textContent = "✅ Guardar";
+    tr.style.opacity = "1";
+    alert("No se pudo subir el archivo: " + err.message);
   }
 }
 
