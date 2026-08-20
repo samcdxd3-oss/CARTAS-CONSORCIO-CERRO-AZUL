@@ -1737,14 +1737,8 @@ async function abrirModalRecorte(tipo, grupoId, file){
       });
 
       if(valores.length > 1){
-        // Avanza el ítem activo para que el próximo recorte siga donde quedamos
-        _recorte.filaActivaIndex = _recorte.filaActivaIndex + valores.length;
-        if(_recorte.filaActivaIndex > _recorte.totalFilas - 1) _recorte.filaActivaIndex = _recorte.totalFilas - 1;
-        document.getElementById("filaActivaRecorteLabel").textContent = _recorte.filaActivaIndex + 1;
-        actualizarResaltadoFilaActiva();
-
         const msg = document.getElementById("msgRecorte");
-        msg.textContent = `Se detectaron ${valores.length} valores en ese recorte — se repartieron en ${valores.length} ítems distintos.`;
+        msg.textContent = `Se detectaron ${valores.length} valores en ese recorte — se repartieron a partir del ítem ${_recorte.filaActivaIndex + 1}. Mueve el "Ítem activo" con las flechas antes del próximo recorte si vas a llenar otro campo.`;
         msg.className = "msg-form";
       }
     } catch (err) {
@@ -1762,6 +1756,13 @@ function ajustarZoomRecorte(delta){
   document.getElementById("porcentajeZoomRecorte").textContent = _recorte.zoom + "%";
 }
 
+function filaCeldaRecorteHTML(indice, campo){
+  return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-soft);width:18px;flex-shrink:0;">${indice+1}.</span>
+    <input data-fila="${indice}" data-campo="${campo}" style="flex:1;min-width:0;">
+  </div>`;
+}
+
 function renderCamposRecorte(tipo){
   const campos = CAMPOS_RECORTE[tipo];
   const cont = document.getElementById("filasRecorteContenedor");
@@ -1775,13 +1776,11 @@ function renderCamposRecorte(tipo){
     </div>
     ${campos.map(c => `
       <div style="border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
           <label style="margin:0;">${c.label}</label>
           <button type="button" onclick="activarTijeraCampo('${c.key}', this)" style="background:transparent;border:1.5px solid var(--stamp-orange);color:var(--stamp-orange);border-radius:5px;width:28px;height:26px;cursor:pointer;">✂️</button>
         </div>
-        <div id="celdas-${c.key}" style="display:flex;flex-wrap:wrap;gap:6px;">
-          <input data-fila="0" data-campo="${c.key}" style="width:120px;">
-        </div>
+        <div id="celdas-${c.key}">${filaCeldaRecorteHTML(0, c.key)}</div>
       </div>`).join("")}`;
   actualizarResaltadoFilaActiva();
 }
@@ -1814,7 +1813,7 @@ function asegurarFilaRecorte(indice, tipo){
     const nuevoIndex = _recorte.totalFilas;
     campos.forEach(c => {
       const cont = document.getElementById("celdas-" + c.key);
-      if(cont) cont.insertAdjacentHTML("beforeend", `<input data-fila="${nuevoIndex}" data-campo="${c.key}" style="width:120px;">`);
+      if(cont) cont.insertAdjacentHTML("beforeend", filaCeldaRecorteHTML(nuevoIndex, c.key));
     });
     _recorte.totalFilas++;
   }
