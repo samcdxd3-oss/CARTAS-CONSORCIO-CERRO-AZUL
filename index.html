@@ -1591,11 +1591,215 @@ async function eliminarGrupoReq(grupoId){
   }
 }
 
+// ===================== RECORTE MANUAL DE FOTOS (Requerimientos + Almacén) =====================
+const CAMPOS_RECORTE = {
+  req: [
+    { key: "cantidad", label: "Cantidad" },
+    { key: "unidad", label: "Unidad" },
+    { key: "descripcion", label: "Descripción" },
+    { key: "partida", label: "Partida a ejecutar" },
+    { key: "observaciones", label: "Observaciones" }
+  ],
+  alm: [
+    { key: "codigo", label: "Código" },
+    { key: "cantidad", label: "Cantidad" },
+    { key: "unidad", label: "Unidad" },
+    { key: "descripcion", label: "Descripción" },
+    { key: "peso", label: "Peso" },
+    { key: "observaciones", label: "Observaciones" }
+  ]
+};
+let _recorte = null;
+
+async function abrirModalRecorte(tipo, grupoId, file){
+  const preview = await generarPreviewArchivo(file);
+  if(!preview){ alert("No se pudo generar una vista previa de este archivo."); return; }
+
+  const overlay = document.createElement("div");
+  overlay.className = "overlay-modal";
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+
+  overlay.innerHTML = `
+    <div class="modal-panel" style="max-width:1150px;">
+      <h3>✂️ Recortar y transcribir</h3>
+      <div class="archivo-nombre">${escapeHtml(file.name)} — toca la tijera ✂️ de una celda y luego dibuja un recuadro sobre ese dato en la foto</div>
+      <div class="modal-body">
+        <div class="modal-preview" style="position:relative;touch-action:none;">
+          <img id="imgRecorteBase" src="${preview}" style="width:100%;display:block;border-radius:8px;border:1px solid var(--line);user-select:none;-webkit-user-drag:none;">
+          <div id="cajaSeleccionRecorte" style="position:absolute;border:2px dashed var(--stamp-orange);background:rgba(232,89,12,.15);display:none;pointer-events:none;"></div>
+        </div>
+        <div class="modal-fields">
+          <div id="filasRecorteContenedor"></div>
+          <button type="button" class="btn-secundario" style="width:100%;margin-top:6px;" onclick="agregarFilaRecorte('${tipo}')">+ Otro ítem</button>
+          <div class="modal-botones">
+            <button class="cancelar" onclick="this.closest('.overlay-modal').remove()">Cancelar</button>
+            <button class="confirmar" id="btnGuardarRecorte">✅ Guardar todo</button>
+          </div>
+          <div class="msg-form" id="msgRecorte"></div>
+        </div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  _recorte = { tipo, grupoId, file, campoActivo: null, filaActivaIndex: 0, totalFilas: 0 };
+  agregarFilaRecorte(tipo);
+
+  const img = document.getElementById("imgRecorteBase");
+  const caja = document.getElementById("cajaSeleccionRecorte");
+  let inicio = null;
+
+  function posRelativa(e){
+    const rect = img.getBoundingClientRect();
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    return { x: Math.max(0, Math.min(x, rect.width)), y: Math.max(0, Math.min(y, rect.height)), rect };
+  }
+
+  img.addEventListener("pointerdown", (e) => {
+    if(!_recorte.campoActivo) return;
+    e.preventDefault();
+    inicio = posRelativa(e);
+    caja.style.left = inicio.x + "px"; caja.style.top = inicio.y + "px";
+    caja.style.width = "0px"; caja.style.height = "0px";
+    caja.style.display = "block";
+  });
+
+  window.addEventListener("pointermove", (e) => {
+    if(!inicio) return;
+    e.preventDefault();
+    const p = posRelativa(e);
+    const x = Math.min(inicio.x, p.x), y = Math.min(inicio.y, p.y);
+    caja.style.left = x + "px"; caja.style.top = y + "px";
+    caja.style.width = Math.abs(p.x - inicio.x) + "px";
+    caja.style.height = Math.abs(p.y - inicio.y) + "px";
+  });
+
+  window.addEventListener("pointerup", async (e) => {
+    if(!inicio) return;
+    const p = posRelativa(e);
+    const rect = img.getBoundingClientRect();
+    const x1 = Math.min(inicio.x, p.x), y1 = Math.min(inicio.y, p.y);
+    const x2 = Math.max(inicio.x, p.x), y2 = Math.max(inicio.y, p.y);
+    inicio = null;
+    caja.style.display = "none";
+    if((x2 - x1) < 8 || (y2 - y1) < 8) return;
+
+    const escalaX = img.naturalWidth / rect.width;
+    const escalaY = img.naturalHeight / rect.height;
+    const sx = x1 * escalaX, sy = y1 * escalaY, sw = (x2 - x1) * escalaX, sh = (y2 - y1) * escalaY;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = sw; canvas.height = sh;
+    canvas.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+
+    const targetInput = document.querySelector(`[data-fila="${_recorte.filaActivaIndex}"][data-campo="${_recorte.campoActivo}"]`);
+    if(targetInput){ targetInput.value = "🔍 leyendo..."; targetInput.disabled = true; }
+
+    try {
+      const base64 = canvas.toDataURL("image/png").split(",")[1];
+      const pin = await pedirPin();
+      if(!pin) throw new Error("Falta el PIN.");
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ accion: "leerTextoPlano", pin, archivoBase64: base64, mimeType: "image/png" })
+      });
+      const data = await res.json();
+      if(targetInput){
+        targetInput.disabled = false;
+        targetInput.value = data.ok ? (data.texto || "").trim().replace(/\s+/g, " ") : "";
+        targetInput.focus();
+      }
+      if(!data.ok) alert("No se pudo leer ese recorte: " + (data.error || ""));
+    } catch (err) {
+      if(targetInput){ targetInput.disabled = false; targetInput.value = ""; }
+      alert("No se pudo leer ese recorte: " + err.message);
+    }
+  });
+
+  document.getElementById("btnGuardarRecorte").onclick = confirmarGuardarRecorte;
+}
+
+function agregarFilaRecorte(tipo){
+  const idx = _recorte.totalFilas++;
+  const campos = CAMPOS_RECORTE[tipo];
+  const cont = document.getElementById("filasRecorteContenedor");
+  const div = document.createElement("div");
+  div.style.cssText = "border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px;";
+  div.innerHTML = `<div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-soft);margin-bottom:6px;">Ítem ${idx + 1}</div>` +
+    campos.map(c => `
+      <label style="display:flex;align-items:center;justify-content:space-between;">${c.label}
+        <button type="button" onclick="activarTijera(${idx},'${c.key}',this)" style="background:transparent;border:1.5px solid var(--stamp-orange);color:var(--stamp-orange);border-radius:5px;width:28px;height:26px;cursor:pointer;">✂️</button>
+      </label>
+      <input data-fila="${idx}" data-campo="${c.key}" style="width:100%;margin-bottom:8px;">
+    `).join("");
+  cont.appendChild(div);
+}
+
+function activarTijera(filaIndex, campo, btn){
+  _recorte.campoActivo = campo;
+  _recorte.filaActivaIndex = filaIndex;
+  document.querySelectorAll("#filasRecorteContenedor button").forEach(b => { b.style.background = "transparent"; b.style.color = "var(--stamp-orange)"; });
+  btn.style.background = "var(--stamp-orange)"; btn.style.color = "#fff";
+  const msg = document.getElementById("msgRecorte");
+  msg.textContent = "Ahora dibuja un recuadro sobre ese dato en la foto de la izquierda.";
+  msg.className = "msg-form";
+}
+
+async function confirmarGuardarRecorte(){
+  const { tipo, grupoId, file } = _recorte;
+  const campos = CAMPOS_RECORTE[tipo];
+  const filas = [];
+  for(let i = 0; i < _recorte.totalFilas; i++){
+    const fila = {}; let tieneAlgo = false;
+    campos.forEach(c => {
+      const input = document.querySelector(`[data-fila="${i}"][data-campo="${c.key}"]`);
+      fila[c.key] = input ? input.value.trim() : "";
+      if(fila[c.key]) tieneAlgo = true;
+    });
+    if(tieneAlgo) filas.push(fila);
+  }
+
+  const msg = document.getElementById("msgRecorte");
+  if(filas.length === 0){ msg.textContent = "Completa al menos un ítem antes de guardar."; msg.className = "msg-form err"; return; }
+
+  const pin = await pedirPin();
+  if(!pin) return;
+
+  const btn = document.getElementById("btnGuardarRecorte");
+  btn.disabled = true; btn.textContent = "Guardando...";
+
+  try {
+    const base64 = await archivoABase64(file);
+    const grupo = tipo === "req" ? DATA_REQ.find(g => g.id === grupoId) : DATA_ALM.find(g => g.id === grupoId);
+    const esNuevo = grupo ? grupo._nueva : true;
+    const accion = tipo === "req" ? "guardarGrupoRequerimiento" : "guardarGrupoAlmacen";
+
+    const body = {
+      accion, pin, id: esNuevo ? null : grupoId,
+      fecha: grupo ? grupo.fecha : isoADDMMYYYY(new Date().toISOString().split("T")[0]),
+      items: filas, archivoBase64: base64, mimeType: file.type || "application/pdf"
+    };
+    if(tipo === "alm") body.tipo = grupo ? grupo.tipo : "entrada";
+
+    const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Error desconocido");
+
+    if(grupo){ grupo.link = data.link; grupo.items = data.items; if(esNuevo){ grupo.id = data.id; grupo._nueva = false; } }
+
+    document.querySelector(".overlay-modal").remove();
+    if(tipo === "req") renderRequerimientos(); else renderAlmacen();
+  } catch (err) {
+    msg.textContent = "❌ " + err.message; msg.className = "msg-form err";
+    btn.disabled = false; btn.textContent = "✅ Guardar todo";
+  }
+}
+
 function adjuntarArchivoGrupoReq(grupoId){
   const input = document.createElement("input");
   input.type = "file";
   input.accept = "image/*,application/pdf";
-  input.onchange = () => { if(input.files[0]) subirArchivoParaGrupoReq(grupoId, input.files[0]); };
+  input.onchange = () => { if(input.files[0]) abrirModalRecorte("req", grupoId, input.files[0]); };
   input.click();
 }
 
@@ -1892,7 +2096,7 @@ function adjuntarArchivoGrupoAlm(grupoId){
   const input = document.createElement("input");
   input.type = "file";
   input.accept = "image/*,application/pdf";
-  input.onchange = () => { if(input.files[0]) subirArchivoParaGrupoAlm(grupoId, input.files[0]); };
+  input.onchange = () => { if(input.files[0]) abrirModalRecorte("alm", grupoId, input.files[0]); };
   input.click();
 }
 
