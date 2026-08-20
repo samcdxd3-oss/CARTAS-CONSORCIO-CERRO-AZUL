@@ -1286,6 +1286,17 @@ if("serviceWorker" in navigator){
 }
 
 // ===================== MÓDULO: REQUERIMIENTOS =====================
+function fechaAISO(fechaTexto){
+  const partes = String(fechaTexto||"").split("/");
+  if(partes.length === 3) return `${partes[2]}-${partes[1].padStart(2,"0")}-${partes[0].padStart(2,"0")}`;
+  return new Date().toISOString().split("T")[0];
+}
+function isoADDMMYYYY(iso){
+  if(!iso) return "";
+  const [a,m,d] = iso.split("-");
+  return `${d}/${m}/${a}`;
+}
+
 let DATA_REQ = []; // array de GRUPOS, cada uno con .items[]
 let filtroEstadoReq = null;
 
