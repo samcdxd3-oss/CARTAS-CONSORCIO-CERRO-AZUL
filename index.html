@@ -1736,11 +1736,17 @@ async function abrirModalRecorte(tipo, grupoId, file){
         if(input) input.value = valor.replace(/\s+/g, " ").trim();
       });
 
-      if(valores.length > 1){
-        const msg = document.getElementById("msgRecorte");
-        msg.textContent = `Se detectaron ${valores.length} valores en ese recorte — se repartieron a partir del ítem ${_recorte.filaActivaIndex + 1}. Mueve el "Ítem activo" con las flechas antes del próximo recorte si vas a llenar otro campo.`;
-        msg.className = "msg-form";
-      }
+      // Avanza el ítem activo dentro de ESTE MISMO campo, para que el próximo recorte
+      // (del mismo campo) caiga solo en la fila siguiente. Al cambiar de campo, se reinicia a 1.
+      _recorte.filaActivaIndex += valores.length;
+      document.getElementById("filaActivaRecorteLabel").textContent = _recorte.filaActivaIndex + 1;
+      actualizarResaltadoFilaActiva();
+
+      const msg = document.getElementById("msgRecorte");
+      msg.textContent = valores.length > 1
+        ? `Se detectaron ${valores.length} valores — repartidos, y el ítem activo avanzó al ${_recorte.filaActivaIndex + 1}.`
+        : `Listo — el ítem activo avanzó al ${_recorte.filaActivaIndex + 1} para el próximo recorte de este mismo campo.`;
+      msg.className = "msg-form";
     } catch (err) {
       if(targetInput){ targetInput.disabled = false; targetInput.value = ""; }
       alert("No se pudo leer ese recorte: " + err.message);
@@ -1820,11 +1826,16 @@ function asegurarFilaRecorte(indice, tipo){
 }
 
 function activarTijeraCampo(campo, btn){
+  if(_recorte.campoActivo !== campo){
+    _recorte.filaActivaIndex = 0; // nuevo campo: empieza siempre desde el ítem 1
+    document.getElementById("filaActivaRecorteLabel").textContent = "1";
+    actualizarResaltadoFilaActiva();
+  }
   _recorte.campoActivo = campo;
   document.querySelectorAll("#filasRecorteContenedor button[onclick^='activarTijeraCampo']").forEach(b => { b.style.background = "transparent"; b.style.color = "var(--stamp-orange)"; });
   btn.style.background = "var(--stamp-orange)"; btn.style.color = "#fff";
   const msg = document.getElementById("msgRecorte");
-  msg.textContent = `Dibuja un recuadro sobre "${campo}" — se llenará desde el ítem ${_recorte.filaActivaIndex + 1} en adelante.`;
+  msg.textContent = `Dibuja un recuadro sobre "${campo}" — se llenará el ítem ${_recorte.filaActivaIndex + 1}, y avanza solo con cada recorte siguiente.`;
   msg.className = "msg-form";
 }
 
