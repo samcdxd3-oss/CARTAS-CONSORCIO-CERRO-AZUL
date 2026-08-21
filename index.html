@@ -1382,19 +1382,25 @@ function renderRequerimientos(){
   const totalItems = DATA_REQ.reduce((n, g) => n + g.items.length, 0);
 
   let filasHtml = "";
+  let esPrimerGrupoVisible = true;
   DATA_REQ.forEach(grupo => {
     const itemsFiltrados = filtroEstadoReq ? grupo.items.filter(it => it.estado === filtroEstadoReq) : grupo.items;
     if(itemsFiltrados.length === 0 && grupo.items.length > 0) return; // grupo sin nada que mostrar con este filtro
 
+    if(!esPrimerGrupoVisible){
+      filasHtml += `<tr><td colspan="10" style="border:none;padding:0;height:16px;background:transparent;"></td></tr>`;
+    }
+    esPrimerGrupoVisible = false;
+
     filasHtml += `<tr>
-      <td colspan="10" style="background:var(--paper-dim);padding:8px 12px;">
-        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:'IBM Plex Mono',monospace;font-size:12px;">
+      <td colspan="10" style="background:var(--ink);padding:9px 12px;border-radius:8px 8px 0 0;">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#fff;">
           <b>📦 Requerimiento — ${escapeHtml(grupo.fecha)}</b>
           ${grupo.link
-            ? `<a href="${grupo.link}" target="_blank" rel="noopener">📄 Ver documento</a>`
-            : `<button type="button" onclick="adjuntarArchivoGrupoReq('${grupo.id}')" style="background:transparent;border:1.5px solid var(--ink-soft);border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--ink-soft);">📎 Adjuntar foto/PDF</button>`}
-          <button type="button" class="btn-secundario" onclick="agregarItemAGrupoReq('${grupo.id}')" style="padding:4px 10px;">+ Ítem</button>
-          <button type="button" onclick="eliminarGrupoReq('${grupo.id}')" style="background:transparent;border:1.5px solid var(--stamp-error);color:var(--stamp-error);border-radius:6px;padding:3px 8px;cursor:pointer;">✕ Quitar grupo</button>
+            ? `<a href="${grupo.link}" target="_blank" rel="noopener" style="color:var(--celeste);">📄 Ver documento</a>`
+            : `<button type="button" onclick="adjuntarArchivoGrupoReq('${grupo.id}')" style="background:rgba(255,255,255,.15);border:1.5px solid rgba(255,255,255,.4);border-radius:6px;padding:3px 8px;cursor:pointer;color:#fff;">📎 Adjuntar foto/PDF</button>`}
+          <button type="button" onclick="agregarItemAGrupoReq('${grupo.id}')" style="background:rgba(255,255,255,.15);border:1.5px solid rgba(255,255,255,.4);border-radius:6px;padding:4px 10px;cursor:pointer;color:#fff;">+ Ítem</button>
+          <button type="button" onclick="eliminarGrupoReq('${grupo.id}')" style="background:transparent;border:1.5px solid var(--stamp-orange);color:var(--stamp-orange);border-radius:6px;padding:3px 8px;cursor:pointer;">✕ Quitar grupo</button>
         </div>
       </td>
     </tr>`;
@@ -2062,11 +2068,11 @@ function renderStockAlmacen(){
           ${stock.map(p => `
             <tr>
               <td style="text-align:center;font-family:'IBM Plex Mono',monospace;">${escapeHtml(p.codigo)}</td>
-              <td>${escapeHtml(p.descripcion) || "<i style='color:var(--ink-soft);'>(sin descripción)</i>"}</td>
+              <td>${escapeHtml(p.descripcion)}</td>
               <td style="text-align:center;">${escapeHtml(p.unidad)}</td>
-              <td style="text-align:center;color:var(--cat-supervision);">${p.entradas}</td>
-              <td style="text-align:center;color:var(--stamp-orange);">${p.salidas}</td>
-              <td style="text-align:center;font-weight:700;font-size:15px;${p.stock<=0?'color:var(--stamp-error);':''}">${p.stock}</td>
+              <td style="text-align:center;color:var(--cat-supervision);">${p.entradas ? p.entradas : ""}</td>
+              <td style="text-align:center;color:var(--stamp-orange);">${p.salidas ? p.salidas : ""}</td>
+              <td style="text-align:center;font-weight:700;font-size:15px;${p.stock<=0?'color:var(--stamp-error);':''}">${p.stock ? p.stock : (p.stock === 0 ? "0" : "")}</td>
             </tr>`).join("")}
         </tbody>
       </table>
