@@ -1150,6 +1150,15 @@ async function manejarArchivo(file){
 
 function abrirModalRevision(file, parsed, textoLeido, errorServidor, imagenPreview){
   const tipo = (parsed && parsed.tipo) || tipoFormulario;
+
+  // Cambiamos de inmediato el panel de fondo (grid de Emitidos/Recibidos) para que
+  // coincida con lo detectado, así no queda confuso ver "Recibidos" detrás mientras
+  // el modal ya sabe que es una carta Emitida (o viceversa).
+  if(tipoFormulario !== tipo){
+    tipoFormulario = tipo;
+    renderFormulario(document.getElementById("main"));
+  }
+
   const overlay = document.createElement("div");
   overlay.className = "overlay-modal";
   overlay.id = "modalRevision";
