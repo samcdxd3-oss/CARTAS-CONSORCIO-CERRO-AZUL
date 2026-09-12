@@ -164,6 +164,17 @@
   .nota-plazo{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--stamp-orange); margin-top:3px; }
   .nota-responde{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft); margin-top:2px; }
 
+  /* ---- Punto de color de estado (visual rápido, antes del N° de carta) ---- */
+  .punto-estado{
+    display:inline-block; width:12px; height:12px; border-radius:50%;
+    margin-right:2px; vertical-align:middle; border:2px solid var(--ink-soft);
+    background:transparent; flex-shrink:0;
+  }
+  .punto-estado.aprobado{ background:#1FAE5D; border-color:#1FAE5D; }
+  .punto-estado.observado{ background:#E8B800; border-color:#E8B800; }
+  .punto-estado.rechazado{ background:var(--stamp-error); border-color:var(--stamp-error); }
+  .punto-estado.pendiente{ background:transparent; border-color:var(--ink-soft); }
+
   a.link{
     display:inline-flex; align-items:center; gap:6px;
     font-family:'IBM Plex Mono',monospace;
@@ -486,6 +497,10 @@ function renderLista(lista, termino, main, tipo){
     return coincideTexto && coincideEntidad;
   });
 
+  // Orden por fecha REAL (no por cómo esté guardado en el Sheet) — así una carta
+  // reciente nunca se "pierde" entre cartas más viejas.
+  filtrada.sort((a, b) => fechaAValor(b.fecha) - fechaAValor(a.fecha));
+
   let html = `<div class="count">${filtrada.length} carta${filtrada.length===1?"":"s"} encontrada${filtrada.length===1?"":"s"}</div>`;
 
   if(filtrada.length === 0){
@@ -503,14 +518,15 @@ function renderLista(lista, termino, main, tipo){
         <div class="card">
           <span class="stamp ${stampClass}">${stampText}</span>
           <div class="card-top">
+            ${puntoEstado(item, tipo)}
             <span class="numero">N° ${item.numero}</span>
             <span class="fecha">${item.fecha}</span>
-            ${badgeEstado(item)}
+            ${badgeEstado(item, tipo)}
           </div>
           <div class="asunto">${escapeHtml(item.asunto)}</div>
           ${tipo === "emitida" && item.entidad ? `<div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px;">Para: ${escapeHtml(item.entidad)}</div>` : ""}
-          ${notaPlazo(item)}
-          ${notaTipo(item)}
+          ${notaPlazo(item, tipo)}
+          ${notaTipo(item, tipo)}
           <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:6px;">
             ${item.link ? `<a class="link" href="${item.link}" target="_blank" rel="noopener">📄 Ver PDF →</a>` : ""}
             <button type="button" onclick="abrirReferenciasPorFila(${item.fila}, '${tipo}')" style="background:transparent;border:none;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;cursor:pointer;padding:0;">🔗 Buscar referencias</button>
@@ -581,12 +597,43 @@ function badgeEntidad(it){
   return `<span class="stamp otros" style="position:static;transform:none;display:inline-block;margin-left:8px;">OTRO</span>`;
 }
 
-// ---- NUEVO: badges y notas de estado/plazo (alimentados por el análisis de IA en el .gs) ----
-function badgeEstado(it){
-  const e = (it.estado || "").trim().toLowerCase();
+// ---- NUEVO: badges, punto de color y notas de estado/plazo ----
+
+// Calcula el estado REAL de una carta, cruzando emitidas <-> recibidas por número:
+// - Si una carta quedó "pendiente" pero YA existe una carta del otro lado que la
+//   responde (campo respondeANumero), ya no sigue pendiente de verdad:
+//   · Si ESTA carta es RECIBIDA (nos pidieron algo) y ya emitimos una respuesta -> se
+//     pinta verde ("ya cumplimos"), sin importar qué decidieron ellos antes.
+//   · Si ESTA carta es EMITIDA (pedimos algo) y llegó una respuesta -> se usa el
+//     estado de ESA respuesta (aprobado/rechazado/observado) como el resultado real.
+function estadoEfectivo(item, tipoForzado){
+  const tipo = item._tipo || tipoForzado;
+  const eBase = (item.estado || "").trim().toLowerCase();
+  if(eBase !== "pendiente" || !tipo || typeof DATA === "undefined") return eBase;
+
+  const contraparte = tipo === "recibida" ? DATA.emitidas : DATA.recibidas;
+  const respuesta = (contraparte || []).find(c =>
+    String(c.respondeANumero || "").trim() && String(c.respondeANumero || "").trim() === String(item.numero || "").trim()
+  );
+  if(!respuesta) return eBase; // sigue pendiente de verdad, nadie respondió todavía
+
+  if(tipo === "recibida") return "aprobado"; // reutilizamos el verde = "ya respondido/cumplido"
+  const eResp = (respuesta.estado || "").trim().toLowerCase();
+  return (eResp && eResp !== "pendiente") ? eResp : eBase;
+}
+
+function badgeEstado(it, tipoForzado){
+  const e = estadoEfectivo(it, tipoForzado);
   if(!e || e === "no_aplica") return "";
   const textos = { aprobado: "APROBADO", rechazado: "RECHAZADO", observado: "OBSERVADO", pendiente: "PENDIENTE" };
   return `<span class="badge-estado ${e}">${textos[e] || e.toUpperCase()}</span>`;
+}
+
+function puntoEstado(it, tipoForzado){
+  const e = estadoEfectivo(it, tipoForzado);
+  if(!e || e === "no_aplica") return "";
+  const titulos = { aprobado: "Aprobado / ya respondido", rechazado: "Rechazado", observado: "Observado", pendiente: "Pendiente de respuesta" };
+  return `<span class="punto-estado ${e}" title="${titulos[e] || e}"></span>`;
 }
 
 function badgeEstadoHeader(estado){
@@ -595,11 +642,12 @@ function badgeEstadoHeader(estado){
   return `<span style="background:#fff;color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:10px;margin-left:8px;">${textos[e] || textos.pendiente}</span>`;
 }
 
-function notaPlazo(item){
+function notaPlazo(item, tipoForzado){
   if(!item.plazo && !item.plazoDias) return "";
   let out = "";
   if(item.plazo) out += `<div class="nota-plazo">⏳ Plazo: ${escapeHtml(item.plazo)}</div>`;
-  const cuenta = (item.estado || "").trim().toLowerCase() === "pendiente" ? calcularDiasRestantes(item) : null;
+  const estadoReal = estadoEfectivo(item, tipoForzado);
+  const cuenta = estadoReal === "pendiente" ? calcularDiasRestantes(item) : null;
   if(cuenta) out += `<div class="nota-plazo" style="${cuenta.vencido ? 'color:var(--stamp-error);font-weight:700;' : ''}">${cuenta.texto}</div>`;
   return out;
 }
@@ -653,11 +701,11 @@ function calcularDiasRestantes(item){
   return { vencido: false, texto: `🗓️ Quedan ${restantes} día${restantes===1?"":"s"} ${restantes===1?etiquetaTipo:etiquetaTipoPlural} para responder` };
 }
 
-function notaTipo(item){
+function notaTipo(item, tipoForzado){
   const t = (item.tipoContenido || "").trim().toLowerCase();
-  const e = (item.estado || "").trim().toLowerCase();
+  const estadoReal = estadoEfectivo(item, tipoForzado);
   let out = "";
-  if(t === "consulta_nueva" && (e === "pendiente" || !e)) out += `<div class="nota-plazo">🔔 Consulta esperando respuesta</div>`;
+  if(t === "consulta_nueva" && estadoReal === "pendiente") out += `<div class="nota-plazo">🔔 Consulta esperando respuesta</div>`;
   if(item.respondeANumero) out += `<div class="nota-responde">↩ Responde a N° ${escapeHtml(item.respondeANumero)}</div>`;
   return out;
 }
