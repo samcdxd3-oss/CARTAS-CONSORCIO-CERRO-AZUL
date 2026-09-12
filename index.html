@@ -605,8 +605,22 @@ function notaPlazo(item){
 }
 
 // Cuenta regresiva en tiempo real: el día que llega la carta se muestra el plazo completo
-// (ej. "5 días para responder"); desde el día siguiente baja solo (4, 3, 2, 1, 0) hasta "VENCIDO".
+// (ej. "2 días para responder"); desde el día siguiente baja solo hasta "VENCIDO".
 // Se calcula con JS normal comparando fechas — no gasta ninguna llamada a la IA.
+// Si el plazo es en días HÁBILES, no se cuentan sábados ni domingos (feriados no se
+// consideran todavía — mejora pendiente para más adelante).
+function contarDiasHabilesEntre(inicioExclusivo, finInclusive){
+  let contador = 0;
+  let cursor = new Date(inicioExclusivo);
+  cursor.setDate(cursor.getDate() + 1); // arrancamos el día siguiente al inicio
+  while(cursor <= finInclusive){
+    const dia = cursor.getDay(); // 0 = domingo, 6 = sábado
+    if(dia !== 0 && dia !== 6) contador++;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return contador;
+}
+
 function calcularDiasRestantes(item){
   if(!item.plazoDias || !item.fecha) return null;
   const dias = parseInt(item.plazoDias, 10);
@@ -620,16 +634,23 @@ function calcularDiasRestantes(item){
   const hoy = new Date();
   const hoySinHora = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
   const fechaCartaSinHora = new Date(fechaCarta.getFullYear(), fechaCarta.getMonth(), fechaCarta.getDate());
-  const diasTranscurridos = Math.round((hoySinHora - fechaCartaSinHora) / 86400000);
-  const restantes = dias - Math.max(diasTranscurridos, 0);
+
+  const esHabiles = (item.plazoTipo || "").trim().toLowerCase() === "habiles";
+  const diasTranscurridos = esHabiles
+    ? contarDiasHabilesEntre(fechaCartaSinHora, hoySinHora)
+    : Math.max(Math.round((hoySinHora - fechaCartaSinHora) / 86400000), 0);
+
+  const restantes = dias - diasTranscurridos;
+  const etiquetaTipo = esHabiles ? "hábil" : "calendario";
+  const etiquetaTipoPlural = esHabiles ? "hábiles" : "calendario";
 
   if(restantes <= 0){
-    return { vencido: true, texto: `🔴 VENCIDO (plazo de ${dias} día${dias===1?"":"s"} ya pasó)` };
+    return { vencido: true, texto: `🔴 VENCIDO (plazo de ${dias} día${dias===1?"":"s"} ${etiquetaTipoPlural} ya pasó)` };
   }
   if(diasTranscurridos <= 0){
-    return { vencido: false, texto: `🗓️ ${restantes} día${restantes===1?"":"s"} para responder` };
+    return { vencido: false, texto: `🗓️ ${restantes} día${restantes===1?"":"s"} ${restantes===1?etiquetaTipo:etiquetaTipoPlural} para responder` };
   }
-  return { vencido: false, texto: `🗓️ Quedan ${restantes} día${restantes===1?"":"s"} para responder` };
+  return { vencido: false, texto: `🗓️ Quedan ${restantes} día${restantes===1?"":"s"} ${restantes===1?etiquetaTipo:etiquetaTipoPlural} para responder` };
 }
 
 function notaTipo(item){
@@ -840,6 +861,7 @@ const COLUMNAS = {
     { key: "entidad", label: "PARA", ancho: "160px" },
     { key: "plazo", label: "PLAZO", ancho: "100px" },
     { key: "plazoDias", label: "PLAZO (DÍAS)", ancho: "90px" },
+    { key: "plazoTipo", label: "TIPO DÍAS", ancho: "90px" },
     { key: "estado", label: "ESTADO", ancho: "100px" },
     { key: "tipoContenido", label: "TIPO", ancho: "130px" },
     { key: "respondeANumero", label: "RESPONDE A N°", ancho: "100px" },
@@ -854,6 +876,7 @@ const COLUMNAS = {
     { key: "para", label: "PARA (persona)", ancho: "160px" },
     { key: "plazo", label: "PLAZO", ancho: "100px" },
     { key: "plazoDias", label: "PLAZO (DÍAS)", ancho: "90px" },
+    { key: "plazoTipo", label: "TIPO DÍAS", ancho: "90px" },
     { key: "estado", label: "ESTADO", ancho: "100px" },
     { key: "tipoContenido", label: "TIPO", ancho: "130px" },
     { key: "respondeANumero", label: "RESPONDE A N°", ancho: "100px" },
@@ -1217,6 +1240,12 @@ function abrirModalRevision(file, parsed, textoLeido, errorServidor, imagenPrevi
           <label>Plazo en días (número, para el conteo regresivo)</label>
           <input type="text" id="mPlazoDias" value="${escapeAtributo(parsed && parsed.plazoDias || "")}" inputmode="numeric" placeholder="Ej: 5">
 
+          <label>Tipo de días</label>
+          <select id="mPlazoTipo">
+            <option value="calendario" ${!(parsed && parsed.plazoTipo) || (parsed && parsed.plazoTipo === 'calendario') ? 'selected' : ''}>Días calendario</option>
+            <option value="habiles" ${(parsed&&parsed.plazoTipo)==='habiles'?'selected':''}>Días hábiles (sin sáb./dom.)</option>
+          </select>
+
           <label>Estado</label>
           <select id="mEstado">
             <option value="no_aplica" ${!(parsed && parsed.estado) || (parsed && parsed.estado === 'no_aplica') ? 'selected' : ''}>No aplica / Informativa</option>
@@ -1308,6 +1337,7 @@ async function confirmarGuardarModal(){
     }
     body.plazo = document.getElementById("mPlazo").value.trim();
     body.plazoDias = document.getElementById("mPlazoDias").value.trim();
+    body.plazoTipo = document.getElementById("mPlazoTipo").value;
     body.estado = document.getElementById("mEstado").value;
     body.tipoContenido = document.getElementById("mTipo").value;
     body.respondeANumero = document.getElementById("mRespondeA").value.trim();
@@ -1371,6 +1401,7 @@ async function autoguardarFila(key){
     else { body.codigoDe = valores.codigoDe; body.para = valores.para; }
     body.plazo = valores.plazo;
     body.plazoDias = valores.plazoDias;
+    body.plazoTipo = valores.plazoTipo;
     body.estado = valores.estado;
     body.tipoContenido = valores.tipoContenido;
     body.respondeANumero = valores.respondeANumero;
