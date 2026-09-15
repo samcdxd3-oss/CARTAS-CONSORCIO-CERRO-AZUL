@@ -166,14 +166,14 @@
 
   /* ---- Punto de color de estado (visual rápido, antes del N° de carta) ---- */
   .punto-estado{
-    display:inline-block; width:12px; height:12px; border-radius:50%;
-    margin-right:2px; vertical-align:middle; border:2px solid var(--ink-soft);
-    background:transparent; flex-shrink:0;
+    display:inline-block; width:15px; height:15px; border-radius:50%;
+    margin-right:2px; vertical-align:middle; border:2.5px solid var(--ink-soft);
+    background:var(--paper-dim); flex-shrink:0;
   }
   .punto-estado.aprobado{ background:#1FAE5D; border-color:#1FAE5D; }
   .punto-estado.observado{ background:#E8B800; border-color:#E8B800; }
   .punto-estado.rechazado{ background:var(--stamp-error); border-color:var(--stamp-error); }
-  .punto-estado.pendiente{ background:transparent; border-color:var(--ink-soft); }
+  .punto-estado.pendiente{ background:var(--paper-dim); border-color:var(--ink-soft); }
 
   a.link{
     display:inline-flex; align-items:center; gap:6px;
@@ -262,8 +262,20 @@
   table.grid{ border-collapse:collapse; width:100%; min-width:900px; font-size:12.5px; }
   table.grid th{
     background:var(--ink); color:var(--paper); font-family:'IBM Plex Mono',monospace;
-    font-size:10.5px; text-align:left; padding:8px 6px; white-space:nowrap; position:sticky; top:0;
+    font-size:10.5px; text-align:left; padding:8px 6px; white-space:nowrap; position:sticky; top:66px; z-index:15;
   }
+  /* Columnas fijas (N° y Asunto) SOLO en la tabla de Cartas — quedan visibles aunque
+     hagas scroll horizontal para ver plazo/estado/tipo/etc, como en Excel. */
+  .tabla-cartas th:nth-child(1), .tabla-cartas td:nth-child(1){
+    position:sticky; left:0; z-index:6; background:var(--card);
+  }
+  .tabla-cartas th:nth-child(1){ background:var(--ink); z-index:16; }
+  .tabla-cartas tr.nueva td:nth-child(1){ background:#EAF3FD; }
+  .tabla-cartas th:nth-child(2), .tabla-cartas td:nth-child(2){
+    position:sticky; left:70px; z-index:6; background:var(--card);
+  }
+  .tabla-cartas th:nth-child(2){ background:var(--ink); z-index:16; }
+  .tabla-cartas tr.nueva td:nth-child(2){ background:#EAF3FD; }
   table.grid td{ border-bottom:1px solid var(--paper-dim); padding:3px; vertical-align:top; }
   table.grid input{
     width:100%; border:1px solid transparent; background:transparent; padding:9px 8px; font-size:13.5px;
@@ -652,53 +664,75 @@ function notaPlazo(item, tipoForzado){
   return out;
 }
 
-// Cuenta regresiva en tiempo real: el día que llega la carta se muestra el plazo completo
-// (ej. "2 días para responder"); desde el día siguiente baja solo hasta "VENCIDO".
-// Se calcula con JS normal comparando fechas — no gasta ninguna llamada a la IA.
-// Si el plazo es en días HÁBILES, no se cuentan sábados ni domingos (feriados no se
-// consideran todavía — mejora pendiente para más adelante).
-function contarDiasHabilesEntre(inicioExclusivo, finInclusive){
-  let contador = 0;
-  let cursor = new Date(inicioExclusivo);
-  cursor.setDate(cursor.getDate() + 1); // arrancamos el día siguiente al inicio
-  while(cursor <= finInclusive){
-    const dia = cursor.getDay(); // 0 = domingo, 6 = sábado
-    if(dia !== 0 && dia !== 6) contador++;
-    cursor.setDate(cursor.getDate() + 1);
+// ---- Fechas: helpers compartidos por el modal y por el conteo regresivo ----
+function fechaDesdeDDMMYYYY(str){
+  const p = String(str||"").trim().split("/");
+  if(p.length !== 3) return null;
+  const f = new Date(p[2], p[1]-1, p[0]);
+  return isNaN(f.getTime()) ? null : f;
+}
+function fechaDesdeISO(str){
+  if(!str) return null;
+  const [a,m,d] = String(str).split("-");
+  const f = new Date(a, m-1, d);
+  return isNaN(f.getTime()) ? null : f;
+}
+function sumarDiasHabiles(fecha, dias){
+  const f = new Date(fecha);
+  let contados = 0;
+  while(contados < dias){
+    f.setDate(f.getDate()+1);
+    const d = f.getDay(); // 0=domingo, 6=sábado — feriados no se consideran todavía
+    if(d !== 0 && d !== 6) contados++;
   }
-  return contador;
+  return f;
+}
+function sumarDiasCalendario(fecha, dias){
+  const f = new Date(fecha);
+  f.setDate(f.getDate() + Number(dias));
+  return f;
+}
+function calcularFechaLimite(fechaBase, dias, tipo){
+  if(!fechaBase) return null;
+  const n = parseInt(dias, 10);
+  if(isNaN(n)) return null;
+  return (String(tipo||"").trim().toLowerCase() === "habiles")
+    ? sumarDiasHabiles(fechaBase, n)
+    : sumarDiasCalendario(fechaBase, n);
+}
+function fechaAISOString(d){
+  return d.getFullYear() + "-" + ("0"+(d.getMonth()+1)).slice(-2) + "-" + ("0"+d.getDate()).slice(-2);
+}
+function fechaADDMMYYYY(d){
+  return ("0"+d.getDate()).slice(-2) + "/" + ("0"+(d.getMonth()+1)).slice(-2) + "/" + d.getFullYear();
 }
 
+// Cuenta regresiva en tiempo real. Prioriza la FECHA LÍMITE guardada (la más confiable,
+// y la que se puede corregir a mano si cae un feriado); si una carta vieja no la tiene
+// todavía, la calcula al vuelo desde fecha+plazoDias+plazoTipo (sin feriados) como respaldo.
 function calcularDiasRestantes(item){
-  if(!item.plazoDias || !item.fecha) return null;
-  const dias = parseInt(item.plazoDias, 10);
-  if(isNaN(dias)) return null;
+  let fechaLimite = item.fechaLimite ? fechaDesdeDDMMYYYY(item.fechaLimite) : null;
 
-  const partes = String(item.fecha).trim().split("/");
-  if(partes.length !== 3) return null;
-  const fechaCarta = new Date(partes[2], partes[1] - 1, partes[0]);
-  if(isNaN(fechaCarta.getTime())) return null;
+  if(!fechaLimite){
+    if(!item.plazoDias || !item.fecha) return null;
+    const fechaCarta = fechaDesdeDDMMYYYY(item.fecha);
+    fechaLimite = calcularFechaLimite(fechaCarta, item.plazoDias, item.plazoTipo);
+    if(!fechaLimite) return null;
+  }
 
   const hoy = new Date();
   const hoySinHora = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-  const fechaCartaSinHora = new Date(fechaCarta.getFullYear(), fechaCarta.getMonth(), fechaCarta.getDate());
+  const limiteSinHora = new Date(fechaLimite.getFullYear(), fechaLimite.getMonth(), fechaLimite.getDate());
+  const restantes = Math.round((limiteSinHora - hoySinHora) / 86400000);
+  const textoFecha = fechaADDMMYYYY(limiteSinHora);
 
-  const esHabiles = (item.plazoTipo || "").trim().toLowerCase() === "habiles";
-  const diasTranscurridos = esHabiles
-    ? contarDiasHabilesEntre(fechaCartaSinHora, hoySinHora)
-    : Math.max(Math.round((hoySinHora - fechaCartaSinHora) / 86400000), 0);
-
-  const restantes = dias - diasTranscurridos;
-  const etiquetaTipo = esHabiles ? "hábil" : "calendario";
-  const etiquetaTipoPlural = esHabiles ? "hábiles" : "calendario";
-
-  if(restantes <= 0){
-    return { vencido: true, texto: `🔴 VENCIDO (plazo de ${dias} día${dias===1?"":"s"} ${etiquetaTipoPlural} ya pasó)` };
+  if(restantes < 0){
+    return { vencido: true, texto: `🔴 VENCIDO desde el ${textoFecha}` };
   }
-  if(diasTranscurridos <= 0){
-    return { vencido: false, texto: `🗓️ ${restantes} día${restantes===1?"":"s"} ${restantes===1?etiquetaTipo:etiquetaTipoPlural} para responder` };
+  if(restantes === 0){
+    return { vencido: true, texto: `⏰ Vence HOY (${textoFecha})` };
   }
-  return { vencido: false, texto: `🗓️ Quedan ${restantes} día${restantes===1?"":"s"} ${restantes===1?etiquetaTipo:etiquetaTipoPlural} para responder` };
+  return { vencido: false, texto: `🗓️ Quedan ${restantes} día${restantes===1?"":"s"} (vence ${textoFecha})` };
 }
 
 function notaTipo(item, tipoForzado){
@@ -897,14 +931,15 @@ function escapeHtml(str){
 let filasNuevas = [];        // filas en blanco/prellenadas aún no guardadas
 let archivosPendientes = {}; // key de fila -> File pendiente de subir
 // (se quitó el sistema de deshacer/Ctrl+Z por seguridad — cada acción ya pide confirmación o PIN)
-let ordenDescendente = false; // false = como está en el Sheet, true = últimos agregados primero
+let ordenDescendente = false; // false = como está en el Sheet, true = por fecha real (recientes primero)
+let entidadFiltroPanel = null; // filtro Municipalidad/Supervisión/Otros, solo aplica a Recibidos aquí
 
 const COLUMNAS = {
   emitida: [
     { key: "numero", label: "N° CARTA", ancho: "70px" },
+    { key: "asunto", label: "ASUNTO", ancho: "260px" },
     { key: "fechaRealizado", label: "F. REALIZADO", ancho: "95px" },
     { key: "fecha", label: "F. RECEPCIONADO", ancho: "100px" },
-    { key: "asunto", label: "ASUNTO", ancho: "auto" },
     { key: "informe", label: "N° INFORME", ancho: "80px" },
     { key: "entidad", label: "PARA", ancho: "160px" },
     { key: "plazo", label: "PLAZO", ancho: "100px" },
@@ -913,13 +948,14 @@ const COLUMNAS = {
     { key: "estado", label: "ESTADO", ancho: "100px" },
     { key: "tipoContenido", label: "TIPO", ancho: "130px" },
     { key: "respondeANumero", label: "RESPONDE A N°", ancho: "100px" },
+    { key: "fechaLimite", label: "VENCE EL", ancho: "100px" },
     { key: "link", label: "PDF (link)", ancho: "160px" }
   ],
   recibida: [
     { key: "numero", label: "N° CARTA", ancho: "70px" },
+    { key: "asunto", label: "ASUNTO", ancho: "260px" },
     { key: "codigoDe", label: "CÓDIGO", ancho: "130px" },
     { key: "fecha", label: "F. RECEPCIONADA", ancho: "100px" },
-    { key: "asunto", label: "ASUNTO", ancho: "auto" },
     { key: "entidad", label: "DE (entidad)", ancho: "160px" },
     { key: "para", label: "PARA (persona)", ancho: "160px" },
     { key: "plazo", label: "PLAZO", ancho: "100px" },
@@ -928,6 +964,7 @@ const COLUMNAS = {
     { key: "estado", label: "ESTADO", ancho: "100px" },
     { key: "tipoContenido", label: "TIPO", ancho: "130px" },
     { key: "respondeANumero", label: "RESPONDE A N°", ancho: "100px" },
+    { key: "fechaLimite", label: "VENCE EL", ancho: "100px" },
     { key: "link", label: "PDF (link)", ancho: "160px" }
   ]
 };
@@ -947,8 +984,23 @@ function renderFormulario(main){
 
   const cols = COLUMNAS[tipoFormulario];
   const filasExistentes = tipoFormulario === "emitida" ? DATA.emitidas : DATA.recibidas;
-  const pares = filasExistentes.map((f, i) => ({ f, i }));
-  const paresOrdenados = ordenDescendente ? [...pares].reverse() : pares;
+  let pares = filasExistentes.map((f, i) => ({ f, i }));
+
+  // El filtro de entidad SOLO aplica a Recibidos (igual que en la lista principal).
+  // Se filtra sobre "pares" (no sobre el array original) para no perder el índice real
+  // que usan autoguardarFila/eliminarFilaExistente para ubicar la fila verdadera.
+  if(tipoFormulario === "recibida" && entidadFiltroPanel){
+    pares = pares.filter(p => {
+      const ent = (p.f.entidad || "").toUpperCase();
+      if(entidadFiltroPanel === "OTROS") return !ent.includes("MUNICIPALIDA") && !ent.includes("ANANEA");
+      return ent.includes(entidadFiltroPanel);
+    });
+  }
+
+  // Orden: por fecha real (recientes primero) o tal cual está en el Sheet.
+  const paresOrdenados = ordenDescendente
+    ? [...pares].sort((a, b) => fechaAValor(b.f.fecha) - fechaAValor(a.f.fecha))
+    : pares;
 
   main.innerHTML = `
     <div class="panel-header">
@@ -958,10 +1010,17 @@ function renderFormulario(main){
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn-secundario" id="btnZip" onclick="descargarTodosZip()">⬇ Descargar todos (ZIP)</button>
-        <button class="btn-secundario" onclick="toggleOrden()">↕ ${ordenDescendente ? "Últimos agregados primero" : "Como está en el Sheet"}</button>
+        <button class="btn-secundario" onclick="toggleOrden()">↕ ${ordenDescendente ? "Ordenado por fecha (recientes primero)" : "Como está en el Sheet"}</button>
         ${tipoFormulario === 'emitida' ? `<button class="btn-secundario" onclick="agregarFilaVacia()">+ Nueva fila</button>` : ''}
       </div>
     </div>
+
+    ${tipoFormulario === 'recibida' ? `
+    <div class="chips" style="margin:0 0 10px 0;">
+      <div class="chip ${entidadFiltroPanel==='MUNICIPALIDA'?'on':''}" onclick="filtrarEntidadPanel('MUNICIPALIDA')">Municipalidad</div>
+      <div class="chip ${entidadFiltroPanel==='ANANEA'?'on':''}" onclick="filtrarEntidadPanel('ANANEA')">Supervisión</div>
+      <div class="chip ${entidadFiltroPanel==='OTROS'?'on':''}" onclick="filtrarEntidadPanel('OTROS')">Otros</div>
+    </div>` : ''}
 
     ${tipoFormulario === 'recibida' ? `<p style="font-size:11.5px;color:var(--ink-soft);margin:-4px 0 10px 0;">ℹ️ Las cartas recibidas se agregan solo subiendo el PDF (abajo) — no se escriben filas a mano aquí, para que coincidan siempre con el documento real.</p>` : ''}
 
@@ -973,7 +1032,7 @@ function renderFormulario(main){
     <input type="file" id="fArchivoOculto" accept="application/pdf" style="display:none">
 
     <div class="grid-wrap" style="margin-top:14px;">
-      <table class="grid">
+      <table class="grid tabla-cartas">
         <thead><tr>
           ${cols.map(c => `<th style="${c.ancho!=='auto'?'width:'+c.ancho:''}">${c.label}</th>`).join("")}
           <th style="width:70px"></th>
@@ -1002,6 +1061,9 @@ function filaHTML(f, cols, key, esNueva){
   const celdas = cols.map(c => {
     if(c.key === "link"){
       return `<td><input class="c-link" value="${escapeAtributo(f.link || "")}" onblur="autoguardarFila('${key}')"></td>`;
+    }
+    if(c.key === "asunto"){
+      return `<td><textarea class="c-asunto" rows="2" style="width:100%;min-width:220px;resize:vertical;border:1px solid transparent;background:transparent;padding:9px 8px;font-size:13.5px;font-family:'Inter',sans-serif;border-radius:5px;" onblur="autoguardarFila('${key}')">${escapeHtml(f.asunto || "")}</textarea></td>`;
     }
     return `<td><input class="c-${c.key}" value="${escapeAtributo(f[c.key] || "")}" onblur="autoguardarFila('${key}')"></td>`;
   }).join("");
@@ -1058,6 +1120,11 @@ function eliminarFilaNueva(key){
 
 function toggleOrden(){
   ordenDescendente = !ordenDescendente;
+  renderFormulario(document.getElementById("main"));
+}
+
+function filtrarEntidadPanel(valor){
+  entidadFiltroPanel = (entidadFiltroPanel === valor) ? null : valor;
   renderFormulario(document.getElementById("main"));
 }
 
@@ -1258,7 +1325,7 @@ function abrirModalRevision(file, parsed, textoLeido, errorServidor, imagenPrevi
           <input type="text" id="mNumero" value="${escapeAtributo(parsed && parsed.numero || "")}" inputmode="numeric">
 
           <label>Fecha</label>
-          <input type="date" id="mFecha">
+          <input type="date" id="mFecha" onchange="actualizarFechaLimiteSugerida()">
 
           <label>Asunto</label>
           <textarea id="mAsunto" rows="3">${escapeHtml(parsed && parsed.asunto || "")}</textarea>
@@ -1285,15 +1352,18 @@ function abrirModalRevision(file, parsed, textoLeido, errorServidor, imagenPrevi
           <label>Plazo (si la carta menciona uno)</label>
           <input type="text" id="mPlazo" value="${escapeAtributo(parsed && parsed.plazo || "")}" placeholder="Ej: 10 días hábiles">
 
-          <label>Plazo en días (número, para el conteo regresivo)</label>
-          <input type="text" id="mPlazoDias" value="${escapeAtributo(parsed && parsed.plazoDias || "")}" inputmode="numeric" placeholder="Ej: 5">
+          <label>Plazo en días (número, para calcular la fecha límite)</label>
+          <input type="text" id="mPlazoDias" value="${escapeAtributo(parsed && parsed.plazoDias || "")}" inputmode="numeric" placeholder="Ej: 5" oninput="actualizarFechaLimiteSugerida()">
 
           <label>Tipo de días</label>
-          <select id="mPlazoTipo">
+          <select id="mPlazoTipo" onchange="actualizarFechaLimiteSugerida()">
             <option value="calendario" ${!(parsed && parsed.plazoTipo) || (parsed && parsed.plazoTipo === 'calendario') ? 'selected' : ''}>Días calendario</option>
             <option value="habiles" ${(parsed&&parsed.plazoTipo)==='habiles'?'selected':''}>Días hábiles (sin sáb./dom.)</option>
           </select>
 
+          <label>Fecha límite para responder (calculada — corrígela si cae feriado)</label>
+          <input type="date" id="mFechaLimite">
+          <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0 0;">📌 Se calcula sola desde la Fecha + Plazo. Los feriados no se detectan automáticamente — si uno cae en el rango, ajusta esta fecha a mano.</p>
           <label>Estado</label>
           <select id="mEstado">
             <option value="no_aplica" ${!(parsed && parsed.estado) || (parsed && parsed.estado === 'no_aplica') ? 'selected' : ''}>No aplica / Informativa</option>
@@ -1332,6 +1402,18 @@ function abrirModalRevision(file, parsed, textoLeido, errorServidor, imagenPrevi
   window._tipoModalActual = tipo;
   window._referenciasModalActual = (parsed && parsed.referencias) || "";
   autocompletarCodigoModal();
+}
+
+function actualizarFechaLimiteSugerida(){
+  const campoFecha = document.getElementById("mFecha");
+  const campoDias = document.getElementById("mPlazoDias");
+  const campoTipo = document.getElementById("mPlazoTipo");
+  const campoLimite = document.getElementById("mFechaLimite");
+  if(!campoFecha || !campoDias || !campoTipo || !campoLimite) return;
+
+  const fechaBase = fechaDesdeISO(campoFecha.value);
+  const limite = calcularFechaLimite(fechaBase, campoDias.value, campoTipo.value);
+  if(limite) campoLimite.value = fechaAISOString(limite);
 }
 
 function autocompletarCodigoModal(){
@@ -1386,6 +1468,8 @@ async function confirmarGuardarModal(){
     body.plazo = document.getElementById("mPlazo").value.trim();
     body.plazoDias = document.getElementById("mPlazoDias").value.trim();
     body.plazoTipo = document.getElementById("mPlazoTipo").value;
+    const fechaLimiteISO = document.getElementById("mFechaLimite").value;
+    body.fechaLimite = fechaLimiteISO ? (() => { const [a,m,d] = fechaLimiteISO.split("-"); return `${d}/${m}/${a}`; })() : "";
     body.estado = document.getElementById("mEstado").value;
     body.tipoContenido = document.getElementById("mTipo").value;
     body.respondeANumero = document.getElementById("mRespondeA").value.trim();
@@ -1408,7 +1492,11 @@ async function confirmarGuardarModal(){
     await cargarDatos();
     renderFormulario(document.getElementById("main"));
   } catch (err) {
-    msg.textContent = "❌ " + err.message;
+    // A veces la carta SÍ se guarda en el Sheet (el OCR + la IA tardan mucho con PDFs
+    // largos de varias páginas) pero la respuesta no llega a tiempo al navegador.
+    // Refrescamos los datos para que puedas comprobarlo tú mismo antes de reintentar.
+    await cargarDatos();
+    msg.textContent = "⚠️ " + err.message + " — Revisa la lista: la carta pudo haberse guardado igual (pasa con PDFs largos). Ya refresqué los datos; si no aparece, recién vuelve a intentar.";
     msg.className = "msg-form err";
     btn.disabled = false; btn.textContent = "✅ Guardar carta";
   }
@@ -1450,6 +1538,7 @@ async function autoguardarFila(key){
     body.plazo = valores.plazo;
     body.plazoDias = valores.plazoDias;
     body.plazoTipo = valores.plazoTipo;
+    body.fechaLimite = valores.fechaLimite;
     body.estado = valores.estado;
     body.tipoContenido = valores.tipoContenido;
     body.respondeANumero = valores.respondeANumero;
@@ -1481,7 +1570,8 @@ async function autoguardarFila(key){
     }
   } catch (err) {
     tr.style.backgroundColor = "#FBDCDC";
-    alert("No se pudo guardar esa fila: " + err.message);
+    await cargarDatos();
+    alert("⚠️ " + err.message + "\n\nEsto puede pasar con PDFs largos (el OCR + la IA tardan más de lo que espera el navegador), pero la fila pudo haberse guardado igual. Ya refresqué la lista — revisa antes de reintentar, para no duplicar la carta.");
   }
 }
 
