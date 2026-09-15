@@ -441,15 +441,24 @@ let pinSesion = "";
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 let archivoSeleccionado = null;
 
-async function cargarDatos() {
+async function cargarDatos(intentoNumero) {
+  intentoNumero = intentoNumero || 1;
   try {
     const res = await fetch(API_URL, { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     DATA = await res.json();
     render();
   } catch (err) {
+    // A veces el primer intento falla por un bache pasajero del lado de Google
+    // (sobre todo justo después de publicar una nueva versión) — reintentamos
+    // una vez solo, con una pequeña espera, antes de mostrar el error al usuario.
+    if (intentoNumero < 2) {
+      await new Promise(r => setTimeout(r, 1500));
+      return cargarDatos(intentoNumero + 1);
+    }
     document.getElementById("main").innerHTML =
-      `<div class="estado error">No se pudo cargar la información.<br>Revisa que la URL del API_URL en el código sea correcta y que el despliegue esté activo.<br><br><span style="font-family:'IBM Plex Mono',monospace;font-size:11px">${err.message}</span></div>`;
+      `<div class="estado error">No se pudo cargar la información (2 intentos).<br>Revisa que la URL del API_URL en el código sea correcta y que el despliegue esté activo.<br><br><span style="font-family:'IBM Plex Mono',monospace;font-size:11px">${err.message}</span><br><br>
+      <button onclick="cargarDatos()" style="margin-top:6px;padding:8px 16px;border-radius:8px;border:2px solid var(--ink);background:transparent;color:var(--ink);font-weight:600;">🔄 Reintentar ahora</button></div>`;
   }
 }
 
@@ -1325,7 +1334,7 @@ function abrirModalRevision(file, parsed, textoLeido, errorServidor, imagenPrevi
           <input type="text" id="mNumero" value="${escapeAtributo(parsed && parsed.numero || "")}" inputmode="numeric">
 
           <label>Fecha</label>
-          <input type="date" id="mFecha" onchange="actualizarFechaLimiteSugerida()">
+          <input type="date" id="mFecha" value="${(() => { const f = parsed && parsed.fecha ? fechaDesdeDDMMYYYY(parsed.fecha) : null; return f ? fechaAISOString(f) : ""; })()}" onchange="actualizarFechaLimiteSugerida()">
 
           <label>Asunto</label>
           <textarea id="mAsunto" rows="3">${escapeHtml(parsed && parsed.asunto || "")}</textarea>
@@ -1402,6 +1411,7 @@ function abrirModalRevision(file, parsed, textoLeido, errorServidor, imagenPrevi
   window._tipoModalActual = tipo;
   window._referenciasModalActual = (parsed && parsed.referencias) || "";
   autocompletarCodigoModal();
+  actualizarFechaLimiteSugerida();
 }
 
 function actualizarFechaLimiteSugerida(){
