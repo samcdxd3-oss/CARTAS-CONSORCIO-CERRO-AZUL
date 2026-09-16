@@ -1475,7 +1475,7 @@ async function confirmarGuardarModal(){
     let fecha = "DD/MM/" + new Date().getFullYear();
     if(fechaISO){ const [a,m,d] = fechaISO.split("-"); fecha = `${d}/${m}/${a}`; }
 
-    const body = { accion: "guardarCarta", pin: pinSesion, tipo, numero, fecha, asunto, entidad, referencias: window._referenciasModalActual || "" };
+    const body = { accion: "guardarCarta", pin: pinSesion, tipo, numero, fecha, asunto, entidad, referencias: window._referenciasModalActual || "", nuevaCarta: true };
     if(tipo === "emitida"){
       body.informe = document.getElementById("mInforme").value.trim();
     } else {
@@ -1548,7 +1548,7 @@ async function autoguardarFila(key){
   tr.style.backgroundColor = "#EAF3FD"; // guardando...
 
   try {
-    const body = { accion: "guardarCarta", pin: pinSesion, tipo: tipoFormulario, numero: valores.numero, fecha: valores.fecha || ("DD/MM/" + new Date().getFullYear()), asunto: valores.asunto, entidad: valores.entidad, fila: filaReal };
+    const body = { accion: "guardarCarta", pin: pinSesion, tipo: tipoFormulario, numero: valores.numero, fecha: valores.fecha || ("DD/MM/" + new Date().getFullYear()), asunto: valores.asunto, entidad: valores.entidad, fila: filaReal, nuevaCarta: !filaReal };
     if(tipoFormulario === "emitida"){ body.fechaRealizado = valores.fechaRealizado; body.informe = valores.informe; }
     else { body.codigoDe = valores.codigoDe; body.para = valores.para; }
     body.plazo = valores.plazo;
