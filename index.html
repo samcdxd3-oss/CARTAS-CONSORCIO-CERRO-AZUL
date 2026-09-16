@@ -1038,6 +1038,11 @@ function renderFormulario(main){
       <span class="icono">📄</span>
       <span class="texto" id="dropzoneTexto">Arrastra el PDF aquí, o toca para elegirlo</span>
     </div>
+    <label style="display:flex;align-items:center;gap:8px;font-family:'Inter',sans-serif;font-size:13px;color:var(--ink-soft);margin:8px 0 0 0;font-weight:400;">
+      <input type="checkbox" id="chkUsarIA" checked style="width:auto;">
+      🤖 Usar IA para detectar plazo/estado/tipo automáticamente
+    </label>
+    <p style="font-size:11px;color:var(--ink-soft);margin:2px 0 0 26px;">Desactívalo para cartas antiguas que solo quieres archivar (sin analizar) — así no gastas cupo de IA en cartas donde no hace falta.</p>
     <input type="file" id="fArchivoOculto" accept="application/pdf" style="display:none">
 
     <div class="grid-wrap" style="margin-top:14px;">
@@ -1273,10 +1278,11 @@ async function manejarArchivo(file){
       let parsed = null, textoLeido = "", errorServidor = "";
       try {
         const base64 = await archivoABase64(file);
+        const usarIA = document.getElementById("chkUsarIA") ? document.getElementById("chkUsarIA").checked : true;
         const res = await fetch(API_URL, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ accion: "leerPDF", pin: pinSesion, archivoBase64: base64, mimeType: file.type || "application/pdf" })
+          body: JSON.stringify({ accion: "leerPDF", pin: pinSesion, archivoBase64: base64, mimeType: file.type || "application/pdf", usarIA })
         });
         const data = await res.json();
         if(data.ok){ parsed = data.datos; textoLeido = data.textoLeido || ""; }
