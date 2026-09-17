@@ -620,6 +620,16 @@ function badgeEntidad(it){
 
 // ---- NUEVO: badges, punto de color y notas de estado/plazo ----
 
+// Reduce el texto libre de "entidad" a un código corto y comparable — así el cruce de
+// pendiente/respondida no confunde a la Municipalidad con Ananea solo porque comparten
+// por casualidad el mismo N° de carta (cada entidad numera sus cartas por su cuenta).
+function codigoEntidadDe(str){
+  const s = String(str || "").toUpperCase();
+  if(s.includes("MUNICIPALIDA")) return "GDTI";
+  if(s.includes("ANANEA")) return "ANANEA";
+  return "OTRO";
+}
+
 // Calcula el estado REAL de una carta, cruzando emitidas <-> recibidas por número:
 // - Si una carta quedó "pendiente" pero YA existe una carta del otro lado que la
 //   responde (campo respondeANumero), ya no sigue pendiente de verdad:
@@ -632,9 +642,11 @@ function estadoEfectivo(item, tipoForzado){
   const eBase = (item.estado || "").trim().toLowerCase();
   if(eBase !== "pendiente" || !tipo || typeof DATA === "undefined") return eBase;
 
+  const codigoItem = codigoEntidadDe(item.entidad);
   const contraparte = tipo === "recibida" ? DATA.emitidas : DATA.recibidas;
   const respuesta = (contraparte || []).find(c =>
     String(c.respondeANumero || "").trim() && String(c.respondeANumero || "").trim() === String(item.numero || "").trim()
+    && codigoEntidadDe(c.entidad) === codigoItem
   );
   if(!respuesta) return eBase; // sigue pendiente de verdad, nadie respondió todavía
 
