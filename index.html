@@ -630,6 +630,32 @@ function codigoEntidadDe(str){
   return "OTRO";
 }
 
+// El campo "Responde a carta N°" a veces trae más que el número puro — por ejemplo, si la
+// IA (o alguien a mano) copia la cita completa de la Referencia tal cual aparece en la carta
+// ("0345-2026-GDTI-GM-MDCN-T" en vez de solo "345"). Esto saca solo la primera racha de
+// dígitos y le quita los ceros a la izquierda, para poder comparar números limpios contra
+// el campo "numero" (que sí se guarda siempre así de simple).
+function soloNumero(str){
+  const m = String(str || "").match(/\d+/);
+  if(!m) return "";
+  return String(parseInt(m[0], 10));
+}
+
+// Busca, del otro lado (emitidas<->recibidas), la carta que respondió a "item" — o null si
+// nadie lo ha hecho todavía. Se usa tanto para decidir el estado real como para saber SI
+// se respondió a tiempo o tarde.
+function buscarRespuesta(item, tipoForzado){
+  const tipo = item._tipo || tipoForzado;
+  if(!tipo || typeof DATA === "undefined") return null;
+  const numeroItem = soloNumero(item.numero);
+  if(!numeroItem) return null;
+  const codigoItem = codigoEntidadDe(item.entidad);
+  const contraparte = tipo === "recibida" ? DATA.emitidas : DATA.recibidas;
+  return (contraparte || []).find(c =>
+    soloNumero(c.respondeANumero) === numeroItem && codigoEntidadDe(c.entidad) === codigoItem
+  ) || null;
+}
+
 // Calcula el estado REAL de una carta, cruzando emitidas <-> recibidas por número:
 // - Si una carta quedó "pendiente" pero YA existe una carta del otro lado que la
 //   responde (campo respondeANumero), ya no sigue pendiente de verdad:
@@ -640,14 +666,9 @@ function codigoEntidadDe(str){
 function estadoEfectivo(item, tipoForzado){
   const tipo = item._tipo || tipoForzado;
   const eBase = (item.estado || "").trim().toLowerCase();
-  if(eBase !== "pendiente" || !tipo || typeof DATA === "undefined") return eBase;
+  if(eBase !== "pendiente" || !tipo) return eBase;
 
-  const codigoItem = codigoEntidadDe(item.entidad);
-  const contraparte = tipo === "recibida" ? DATA.emitidas : DATA.recibidas;
-  const respuesta = (contraparte || []).find(c =>
-    String(c.respondeANumero || "").trim() && String(c.respondeANumero || "").trim() === String(item.numero || "").trim()
-    && codigoEntidadDe(c.entidad) === codigoItem
-  );
+  const respuesta = buscarRespuesta(item, tipoForzado);
   if(!respuesta) return eBase; // sigue pendiente de verdad, nadie respondió todavía
 
   if(tipo === "recibida") return "aprobado"; // reutilizamos el verde = "ya respondido/cumplido"
@@ -675,13 +696,42 @@ function badgeEstadoHeader(estado){
   return `<span style="background:#fff;color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:10px;margin-left:8px;">${textos[e] || textos.pendiente}</span>`;
 }
 
+// Consigue la fecha límite de una carta como objeto Date: prioriza la guardada (fechaLimite,
+// la más confiable — se puede corregir a mano si cae un feriado), y si una carta vieja no la
+// tiene, la calcula al vuelo desde fecha+plazoDias+plazoTipo como respaldo.
+function obtenerFechaLimiteObj(item){
+  let f = item.fechaLimite ? fechaDesdeDDMMYYYY(item.fechaLimite) : null;
+  if(!f && item.plazoDias && item.fecha){
+    f = calcularFechaLimite(fechaDesdeDDMMYYYY(item.fecha), item.plazoDias, item.plazoTipo);
+  }
+  return f;
+}
+
 function notaPlazo(item, tipoForzado){
   if(!item.plazo && !item.plazoDias) return "";
   let out = "";
   if(item.plazo) out += `<div class="nota-plazo">⏳ Plazo: ${escapeHtml(item.plazo)}</div>`;
   const estadoReal = estadoEfectivo(item, tipoForzado);
-  const cuenta = estadoReal === "pendiente" ? calcularDiasRestantes(item) : null;
-  if(cuenta) out += `<div class="nota-plazo" style="${cuenta.vencido ? 'color:var(--stamp-error);font-weight:700;' : ''}">${cuenta.texto}</div>`;
+
+  if(estadoReal === "pendiente"){
+    const cuenta = calcularDiasRestantes(item);
+    if(cuenta) out += `<div class="nota-plazo" style="${cuenta.vencido ? 'color:var(--stamp-error);font-weight:700;' : ''}">${cuenta.texto}</div>`;
+    return out;
+  }
+
+  // Ya se respondió — muestra si fue A TIEMPO (verde) o FUERA DE PLAZO (rojo), comparando
+  // la fecha de la respuesta contra la fecha límite de esta carta.
+  const respuesta = buscarRespuesta(item, tipoForzado);
+  if(respuesta && respuesta.fecha){
+    const fechaLimiteObj = obtenerFechaLimiteObj(item);
+    const fechaRespuestaObj = fechaDesdeDDMMYYYY(respuesta.fecha);
+    if(fechaLimiteObj && fechaRespuestaObj){
+      const aTiempo = fechaRespuestaObj.getTime() <= fechaLimiteObj.getTime();
+      out += aTiempo
+        ? `<div class="nota-plazo" style="color:#0E8F5B;font-weight:700;">✅ Respondido a tiempo (${escapeHtml(respuesta.fecha)})</div>`
+        : `<div class="nota-plazo" style="color:var(--stamp-error);font-weight:700;">🔴 Respondido fuera de plazo (fue el ${escapeHtml(respuesta.fecha)}, vencía el ${fechaADDMMYYYY(fechaLimiteObj)})</div>`;
+    }
+  }
   return out;
 }
 
@@ -1411,7 +1461,9 @@ function abrirModalRevision(file, parsed, textoLeido, errorServidor, imagenPrevi
           </select>
 
           <label>Responde a carta N° (si aplica)</label>
-          <input type="text" id="mRespondeA" value="${escapeAtributo(parsed && parsed.respondeANumero || "")}" inputmode="numeric" placeholder="Ej: 245">
+          <input type="text" id="mRespondeA" list="mRespondeADatalist" value="${escapeAtributo(parsed && parsed.respondeANumero || "")}" placeholder="Escribe para buscar por N° o asunto..." oninput="actualizarRespondeADatalist()">
+          <datalist id="mRespondeADatalist"></datalist>
+          <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0 0;">🔎 Empieza a escribir el N° o una palabra del asunto — se sugiere solo, entre las cartas ya cargadas (sin conectarse al servidor, es instantáneo).</p>
 
           ${parsed && parsed.avisoIA ? `<div class="modal-aviso">🤖 La IA no pudo analizar plazo/estado automáticamente (${escapeHtml(parsed.avisoIA)}) — complétalo a mano si corresponde.</div>` : ""}
 
@@ -1430,6 +1482,7 @@ function abrirModalRevision(file, parsed, textoLeido, errorServidor, imagenPrevi
   window._referenciasModalActual = (parsed && parsed.referencias) || "";
   autocompletarCodigoModal();
   actualizarFechaLimiteSugerida();
+  actualizarRespondeADatalist();
 }
 
 function actualizarFechaLimiteSugerida(){
@@ -1453,6 +1506,24 @@ function autocompletarCodigoModal(){
   else campoCodigo.value = "";
 }
 
+// Sugerencias del campo "Responde a carta N°" — 100% del lado del cliente, con los datos
+// que YA están cargados en DATA (no hace ninguna llamada al servidor, así que nunca puede
+// ser la causa de una demora al guardar).
+function actualizarRespondeADatalist(){
+  const input = document.getElementById("mRespondeA");
+  const dl = document.getElementById("mRespondeADatalist");
+  if(!input || !dl) return;
+  const termino = input.value.trim().toUpperCase();
+  const todas = [...(DATA.emitidas||[]), ...(DATA.recibidas||[])];
+  const filtradas = (termino
+    ? todas.filter(it => String(it.numero||"").toUpperCase().includes(termino) || String(it.asunto||"").toUpperCase().includes(termino))
+    : todas
+  ).slice(0, 30);
+  dl.innerHTML = filtradas.map(it =>
+    `<option value="${escapeAtributo(it.numero)}">${escapeAtributo(it.numero)} — ${escapeAtributo(String(it.asunto||"").substring(0,60))}</option>`
+  ).join("");
+}
+
 function cambiarTipoModal(tipo){
   window._tipoModalActual = tipo;
   document.getElementById("mTipoRecibida").classList.toggle("on", tipo === "recibida");
@@ -1466,6 +1537,23 @@ function cerrarModalRevision(){
   const modal = document.getElementById("modalRevision");
   if(modal) modal.remove();
   window._archivoModalActual = null;
+}
+
+// Antes de dejar reintentar un guardado que dio error, revisa si la carta YA quedó
+// guardada (el error pudo ser solo de la respuesta, no del guardado real) — evita que
+// un reintento a ciegas cree una carta duplicada, ahora que un PDF nuevo siempre agrega
+// una fila en vez de buscar y pisar una existente.
+function existeCartaGuardada(tipo, numero, entidad, fechaDDMMYYYY){
+  const lista = (tipo === "emitida" ? DATA.emitidas : DATA.recibidas) || [];
+  const numeroBuscado = soloNumero(numero);
+  if(!numeroBuscado) return false;
+  const codigoBuscado = codigoEntidadDe(entidad);
+  const anioBuscado = (String(fechaDDMMYYYY || "").match(/\d{4}/) || [])[0];
+  return lista.some(it =>
+    soloNumero(it.numero) === numeroBuscado &&
+    codigoEntidadDe(it.entidad) === codigoBuscado &&
+    (!anioBuscado || String(it.fecha || "").includes(anioBuscado))
+  );
 }
 
 async function confirmarGuardarModal(){
@@ -1483,10 +1571,10 @@ async function confirmarGuardarModal(){
   const btn = document.getElementById("btnConfirmarModal");
   btn.disabled = true; btn.textContent = "Guardando...";
 
-  try {
-    let fecha = "DD/MM/" + new Date().getFullYear();
-    if(fechaISO){ const [a,m,d] = fechaISO.split("-"); fecha = `${d}/${m}/${a}`; }
+  let fecha = "DD/MM/" + new Date().getFullYear();
+  if(fechaISO){ const [a,m,d] = fechaISO.split("-"); fecha = `${d}/${m}/${a}`; }
 
+  try {
     const body = { accion: "guardarCarta", pin: pinSesion, tipo, numero, fecha, asunto, entidad, referencias: window._referenciasModalActual || "", nuevaCarta: true };
     if(tipo === "emitida"){
       body.informe = document.getElementById("mInforme").value.trim();
@@ -1522,11 +1610,20 @@ async function confirmarGuardarModal(){
   } catch (err) {
     // A veces la carta SÍ se guarda en el Sheet (el OCR + la IA tardan mucho con PDFs
     // largos de varias páginas) pero la respuesta no llega a tiempo al navegador.
-    // Refrescamos los datos para que puedas comprobarlo tú mismo antes de reintentar.
+    // Refrescamos y REVISAMOS nosotros mismos si ya quedó guardada, para no dejar que
+    // un reintento a ciegas la duplique.
     await cargarDatos();
-    msg.textContent = "⚠️ " + err.message + " — Revisa la lista: la carta pudo haberse guardado igual (pasa con PDFs largos). Ya refresqué los datos; si no aparece, recién vuelve a intentar.";
-    msg.className = "msg-form err";
-    btn.disabled = false; btn.textContent = "✅ Guardar carta";
+    if(existeCartaGuardada(tipo, numero, entidad, fecha)){
+      msg.textContent = "✅ Tranquilo: SÍ se guardó — el error fue solo en la respuesta del servidor, no en el guardado. Ya aparece en la lista. Cierra este modal; si vuelves a tocar \"Guardar\" quedará duplicada.";
+      msg.className = "msg-form ok";
+      btn.textContent = "Cerrar";
+      btn.disabled = false;
+      btn.onclick = cerrarModalRevision;
+    } else {
+      msg.textContent = "⚠️ " + err.message + " — Revisé la lista recién actualizada y esta carta NO aparece, así que de verdad no se guardó. Puedes reintentar con confianza.";
+      msg.className = "msg-form err";
+      btn.disabled = false; btn.textContent = "✅ Guardar carta";
+    }
   }
 }
 
@@ -1599,7 +1696,11 @@ async function autoguardarFila(key){
   } catch (err) {
     tr.style.backgroundColor = "#FBDCDC";
     await cargarDatos();
-    alert("⚠️ " + err.message + "\n\nEsto puede pasar con PDFs largos (el OCR + la IA tardan más de lo que espera el navegador), pero la fila pudo haberse guardado igual. Ya refresqué la lista — revisa antes de reintentar, para no duplicar la carta.");
+    if(existeCartaGuardada(tipoFormulario, valores.numero, valores.entidad, valores.fecha)){
+      alert("✅ Tranquilo: SÍ se guardó — el error fue solo en la respuesta del servidor. Ya aparece en la lista actualizada. No vuelvas a tocar esta fila para reintentar, o quedará duplicada; refresca la vista y edítala desde ahí si necesitas corregir algo.");
+    } else {
+      alert("⚠️ " + err.message + "\n\nRevisé la lista recién actualizada y esta carta NO aparece, así que de verdad no se guardó. Puedes reintentar con confianza.");
+    }
   }
 }
 
