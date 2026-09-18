@@ -161,6 +161,7 @@
   .badge-estado.rechazado{ background:#FBE1E1; color:var(--stamp-error); }
   .badge-estado.observado{ background:#FFF3D6; color:var(--cat-otros); }
   .badge-estado.pendiente{ background:#EAF3FD; color:var(--ink-soft); }
+  .badge-estado.seguimiento{ background:#E3ECFB; color:var(--ink-soft); }
   .nota-plazo{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--stamp-orange); margin-top:3px; }
   .nota-responde{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft); margin-top:2px; }
 
@@ -174,6 +175,7 @@
   .punto-estado.observado{ background:#E8B800; border-color:#E8B800; }
   .punto-estado.rechazado{ background:var(--stamp-error); border-color:var(--stamp-error); }
   .punto-estado.pendiente{ background:var(--paper-dim); border-color:var(--ink-soft); }
+  .punto-estado.seguimiento{ background:#5B8FE0; border-color:#5B8FE0; }
 
   a.link{
     display:inline-flex; align-items:center; gap:6px;
@@ -551,6 +553,7 @@ function renderLista(lista, termino, main, tipo){
           <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:6px;">
             ${item.link ? `<a class="link" href="${item.link}" target="_blank" rel="noopener">📄 Ver PDF →</a>` : ""}
             <button type="button" onclick="abrirReferenciasPorFila(${item.fila}, '${tipo}')" style="background:transparent;border:none;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;cursor:pointer;padding:0;">🔗 Buscar referencias</button>
+            ${botonHilo(item, tipo)}
           </div>
         </div>`;
     });
@@ -656,43 +659,131 @@ function buscarRespuesta(item, tipoForzado){
   ) || null;
 }
 
-// Calcula el estado REAL de una carta, cruzando emitidas <-> recibidas por número:
-// - Si una carta quedó "pendiente" pero YA existe una carta del otro lado que la
-//   responde (campo respondeANumero), ya no sigue pendiente de verdad:
-//   · Si ESTA carta es RECIBIDA (nos pidieron algo) y ya emitimos una respuesta -> se
-//     pinta verde ("ya cumplimos"), sin importar qué decidieron ellos antes.
-//   · Si ESTA carta es EMITIDA (pedimos algo) y llegó una respuesta -> se usa el
-//     estado de ESA respuesta (aprobado/rechazado/observado) como el resultado real.
+// Desde "item", encuentra el ORIGEN del hilo (camina hacia atrás por respondeANumero)
+// y arma la lista completa en orden, desde el primer mensaje hasta el más reciente.
+function encontrarOrigenHilo(item, tipo){
+  let actual = item, tipoActual = tipo, guard = 0;
+  while(actual.respondeANumero && guard++ < 30){
+    const numeroBuscado = soloNumero(actual.respondeANumero);
+    if(!numeroBuscado) break;
+    const codigoBuscado = codigoEntidadDe(actual.entidad);
+    const listaOrigen = tipoActual === "recibida" ? DATA.emitidas : DATA.recibidas;
+    const tipoOrigen = tipoActual === "recibida" ? "emitida" : "recibida";
+    const origen = (listaOrigen || []).find(o => soloNumero(o.numero) === numeroBuscado && codigoEntidadDe(o.entidad) === codigoBuscado);
+    if(!origen) break;
+    actual = origen; tipoActual = tipoOrigen;
+  }
+  return { item: actual, tipo: tipoActual };
+}
+
+function construirHiloCompleto(item, tipoForzado){
+  const tipo = item._tipo || tipoForzado;
+  if(!tipo || typeof DATA === "undefined") return [{ ...item, _tipo: tipo }];
+  const origen = encontrarOrigenHilo(item, tipo);
+  const hilo = [{ ...origen.item, _tipo: origen.tipo }];
+  const vistos = new Set([origen.tipo + "_" + soloNumero(origen.item.numero) + "_" + codigoEntidadDe(origen.item.entidad)]);
+  let actual = origen.item, tipoActual = origen.tipo, guard = 0;
+  while(guard++ < 30){
+    const siguiente = buscarRespuesta(actual, tipoActual);
+    if(!siguiente) break;
+    const tipoSiguiente = tipoActual === "recibida" ? "emitida" : "recibida";
+    const clave = tipoSiguiente + "_" + soloNumero(siguiente.numero) + "_" + codigoEntidadDe(siguiente.entidad);
+    if(vistos.has(clave)) break; // corta si algo se enlazó en círculo
+    vistos.add(clave);
+    hilo.push({ ...siguiente, _tipo: tipoSiguiente });
+    actual = siguiente; tipoActual = tipoSiguiente;
+  }
+  return hilo;
+}
+
+// Recorre el hilo de atrás para adelante buscando la primera decisión REAL (aprobado/
+// rechazado/observado). Si nadie decidió nada todavía pero SÍ hay más de un mensaje,
+// no es "pendiente" (nadie contestó) ni "aprobado" (nada se resolvió) — es "seguimiento":
+// se está conversando, pero sin conclusión todavía.
+function estadoTerminalHilo(hilo){
+  for(let i = hilo.length - 1; i >= 0; i--){
+    const e = (hilo[i].estado || "").trim().toLowerCase();
+    if(e === "aprobado" || e === "rechazado" || e === "observado") return e;
+  }
+  return hilo.length > 1 ? "seguimiento" : "pendiente";
+}
+
+// Calcula el estado REAL de una carta, recorriendo TODO el hilo de idas y vueltas
+// (no solo la primera respuesta) — así una carta pendiente solo se marca "aprobado"
+// cuando alguien, en algún punto del hilo, de verdad aprobó/rechazó/observó algo.
+// Si solo hubo reenvíos o seguimientos sin conclusión, queda en "seguimiento" (ni
+// verde ni la cuenta regresiva de pendiente, algo intermedio).
 function estadoEfectivo(item, tipoForzado){
   const tipo = item._tipo || tipoForzado;
   const eBase = (item.estado || "").trim().toLowerCase();
   if(eBase !== "pendiente" || !tipo) return eBase;
 
-  const respuesta = buscarRespuesta(item, tipoForzado);
-  if(!respuesta) return eBase; // sigue pendiente de verdad, nadie respondió todavía
-
-  if(tipo === "recibida") return "aprobado"; // reutilizamos el verde = "ya respondido/cumplido"
-  const eResp = (respuesta.estado || "").trim().toLowerCase();
-  return (eResp && eResp !== "pendiente") ? eResp : eBase;
+  const hilo = construirHiloCompleto(item, tipoForzado);
+  if(hilo.length <= 1) return eBase; // nadie respondió todavía, sigue pendiente de verdad
+  return estadoTerminalHilo(hilo);
 }
 
 function badgeEstado(it, tipoForzado){
   const e = estadoEfectivo(it, tipoForzado);
   if(!e || e === "no_aplica") return "";
-  const textos = { aprobado: "APROBADO", rechazado: "RECHAZADO", observado: "OBSERVADO", pendiente: "PENDIENTE" };
+  const textos = { aprobado: "APROBADO", rechazado: "RECHAZADO", observado: "OBSERVADO", pendiente: "PENDIENTE", seguimiento: "EN SEGUIMIENTO" };
   return `<span class="badge-estado ${e}">${textos[e] || e.toUpperCase()}</span>`;
+}
+
+// Botón "Ver seguimiento (N)" — SOLO aparece si de verdad hay más de una carta en la
+// conversación; si nadie respondió todavía, no se renderiza nada (para no saturar la
+// pantalla con un botón que no serviría de nada).
+function botonHilo(item, tipoForzado){
+  const tipo = item._tipo || tipoForzado;
+  const hilo = construirHiloCompleto(item, tipo);
+  if(hilo.length <= 1) return "";
+  return `<button type="button" onclick="abrirHiloPorFila(${item.fila}, '${tipo}')" style="background:transparent;border:none;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;cursor:pointer;padding:0;">🔄 Ver seguimiento (${hilo.length})</button>`;
+}
+
+function abrirHiloPorFila(fila, tipo){
+  const lista = tipo === "emitida" ? DATA.emitidas : DATA.recibidas;
+  const item = lista.find(i => i.fila === fila);
+  if(!item) return;
+  abrirHiloModal({ ...item, _tipo: tipo });
+}
+
+function abrirHiloModal(item){
+  const hilo = construirHiloCompleto(item, item._tipo);
+
+  const filas = hilo.map(it => `
+    <div class="bloque-fila" style="grid-template-columns:96px 1fr;">
+      <span class="label">${it._tipo === "emitida" ? "EMITIDA" : "RECIBIDA"}<br>N° ${escapeHtml(it.numero)}</span>
+      <span>${it.fecha ? escapeHtml(it.fecha) + " — " : ""}${escapeHtml(it.asunto || "")}
+        ${badgeEstado(it, it._tipo)}
+        ${it.link ? ` · <a class="link" href="${it.link}" target="_blank" rel="noopener">PDF →</a>` : ""}
+      </span>
+    </div>`).join("");
+
+  const overlay = document.createElement("div");
+  overlay.className = "overlay-modal";
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-panel" style="max-width:640px;">
+      <h3>🔄 Seguimiento completo</h3>
+      <div class="archivo-nombre">${hilo.length} cartas en esta conversación, de principio a fin</div>
+      ${filas}
+      <div class="modal-botones">
+        <button class="confirmar" onclick="this.closest('.overlay-modal').remove()">Cerrar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
 }
 
 function puntoEstado(it, tipoForzado){
   const e = estadoEfectivo(it, tipoForzado);
   if(!e || e === "no_aplica") return "";
-  const titulos = { aprobado: "Aprobado / ya respondido", rechazado: "Rechazado", observado: "Observado", pendiente: "Pendiente de respuesta" };
+  const titulos = { aprobado: "Aprobado / ya respondido", rechazado: "Rechazado", observado: "Observado", pendiente: "Pendiente de respuesta", seguimiento: "Hay respuestas, pero aún sin una decisión final" };
   return `<span class="punto-estado ${e}" title="${titulos[e] || e}"></span>`;
 }
 
 function badgeEstadoHeader(estado){
   const e = (estado || "pendiente").toLowerCase();
-  const textos = { aprobado: "✅ APROBADA", rechazado: "❌ RECHAZADA", observado: "⚠️ OBSERVADA", pendiente: "⏳ PENDIENTE" };
+  const textos = { aprobado: "✅ APROBADA", rechazado: "❌ RECHAZADA", observado: "⚠️ OBSERVADA", pendiente: "⏳ PENDIENTE", seguimiento: "🔄 EN SEGUIMIENTO" };
   return `<span style="background:#fff;color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:10px;margin-left:8px;">${textos[e] || textos.pendiente}</span>`;
 }
 
@@ -824,7 +915,7 @@ function estadoGeneralConsulta(c){
     const e = (todos[i].estado || "").trim().toLowerCase();
     if(e === "aprobado" || e === "rechazado" || e === "observado") return e;
   }
-  return "pendiente";
+  return todos.length > 1 ? "seguimiento" : "pendiente";
 }
 
 function filaBloque(label, it){
